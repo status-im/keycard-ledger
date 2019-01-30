@@ -18,6 +18,8 @@
 #include "os.h"
 #include "cx.h"
 
+#include "glyphs.h"
+
 #include "os_io_seproxyhal.h"
 
 #define OFFSET_CLA 0
@@ -81,7 +83,7 @@ ux_state_t ux;
 // Ledger Blue specific UI
 // ********************************************************************************
 
-static const bagl_element_t bagl_ui_sample_blue[] = {
+static const bagl_element_t ui_idle_blue[] = {
   // {
   //     {type, userid, x, y, width, height, stroke, radius, fill, fgcolor, bgcolor, font_id, icon_id},
   //     text,
@@ -136,7 +138,7 @@ static const bagl_element_t bagl_ui_sample_blue[] = {
   },
 };
 
-static unsigned int bagl_ui_sample_blue_button(unsigned int button_mask, unsigned int button_mask_counter) {
+static unsigned int ui_idle_blue_button(unsigned int button_mask, unsigned int button_mask_counter) {
   return 0;
 }
 
@@ -144,67 +146,20 @@ static unsigned int bagl_ui_sample_blue_button(unsigned int button_mask, unsigne
 // Ledger Nano S specific UI
 // ********************************************************************************
 
-static const bagl_element_t bagl_ui_sample_nanos[] = {
-  // {
-  //     {type, userid, x, y, width, height, stroke, radius, fill, fgcolor, bgcolor, font_id, icon_id},
-  //     text,
-  //     touch_area_brim,
-  //     overfgcolor,
-  //     overbgcolor,
-  //     tap,
-  //     out,
-  //     over,
-  // },
-  {
-    {BAGL_RECTANGLE, 0x00, 0, 0, 128, 32, 0, 0, BAGL_FILL, 0x000000, 0xFFFFFF, 0, 0},
-    NULL,
-    0,
-    0,
-    0,
-    NULL,
-    NULL,
-    NULL,
-  },
-  {
-    {BAGL_LABELINE, 0x01, 0, 12, 128, 32, 0, 0, 0, 0xFFFFFF, 0x000000, BAGL_FONT_OPEN_SANS_REGULAR_11px | BAGL_FONT_ALIGNMENT_CENTER, 0},
-    "Keycard",
-    0,
-    0,
-    0,
-    NULL,
-    NULL,
-    NULL,
-  },
-  {
-    {BAGL_ICON, 0x00, 3, 12, 7, 7, 0, 0, 0, 0xFFFFFF, 0x000000, 0, BAGL_GLYPH_ICON_CROSS},
-    NULL,
-    0,
-    0,
-    0,
-    NULL,
-    NULL,
-    NULL,
-  },
-  {
-    {BAGL_ICON, 0x00, 117, 13, 8, 6, 0, 0, 0, 0xFFFFFF, 0x000000, 0, BAGL_GLYPH_ICON_CHECK},
-    NULL,
-    0,
-    0,
-    0,
-    NULL,
-    NULL,
-    NULL,
-  },
+const ux_menu_entry_t menu_main[];
+
+const ux_menu_entry_t menu_about[] = {
+  {NULL, NULL, 0, NULL, "Version", APPVERSION , 0, 0},
+  {menu_main, NULL, 2, &C_icon_back, "Back", NULL, 61, 40},
+  UX_MENU_END
 };
 
-static unsigned int bagl_ui_sample_nanos_button(unsigned int button_mask, unsigned int button_mask_counter) {
-  switch (button_mask) {
-    case BUTTON_EVT_RELEASED | BUTTON_LEFT | BUTTON_RIGHT: // EXIT
-      io_seproxyhal_touch_exit(NULL);
-      break;
-  }
-  return 0;
-}
+const ux_menu_entry_t menu_main[] = {
+  {NULL, NULL, 0, NULL, "Keycard", "by Status", 0, 0},
+  {menu_about, NULL, 0, NULL, "About", NULL, 0, 0},
+  {NULL, os_sched_exit, 0, &C_icon_dashboard, "Quit app", NULL, 50, 29},
+  UX_MENU_END
+};
 
 static const bagl_element_t *io_seproxyhal_touch_exit(const bagl_element_t *e) {
   // Go back to the dashboard
@@ -239,9 +194,9 @@ unsigned short io_exchange_al(unsigned char channel, unsigned short tx_len) {
 
 static void ui_idle(void) {
   if (os_seph_features() & SEPROXYHAL_TAG_SESSION_START_EVENT_FEATURE_SCREEN_BIG) {
-    UX_DISPLAY(bagl_ui_sample_blue, NULL);
+    UX_DISPLAY(ui_idle_blue, NULL);
   } else {
-    UX_DISPLAY(bagl_ui_sample_nanos, NULL);
+    UX_MENU_DISPLAY(0, menu_main, NULL);
   }
 }
 
@@ -521,13 +476,12 @@ __attribute__((section(".boot"))) int main(void) {
       io_seproxyhal_init();
 
       #ifdef LISTEN_BLE
-      if (os_seph_features() &
-      SEPROXYHAL_TAG_SESSION_START_EVENT_FEATURE_BLE) {
+      if (os_seph_features() & SEPROXYHAL_TAG_SESSION_START_EVENT_FEATURE_BLE) {
         BLE_power(0, NULL);
-        // restart IOs
         BLE_power(1, NULL);
       }
       #endif
+
       USB_power(0);
       USB_power(1);
 

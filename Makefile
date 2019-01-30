@@ -26,6 +26,12 @@ APPNAME = "Keycard"
 APPVERSION = 2.0.0
 APP_LOAD_PARAMS = --appFlags 0x00 $(COMMON_LOAD_PARAMS)
 
+ifeq ($(TARGET_NAME),TARGET_BLUE)
+ICONNAME=blue_app_keycard.gif
+else
+ICONNAME=nanos_app_keycard.gif
+endif
+
 # Build configuration
 
 APP_SOURCE_PATH += src
@@ -81,5 +87,5 @@ delete:
 	python -m ledgerblue.deleteApp $(COMMON_DELETE_PARAMS)
 
 # Import generic rules from the SDK
-
+include $(BOLOS_SDK)/Makefile.glyphs
 include $(BOLOS_SDK)/Makefile.rules
