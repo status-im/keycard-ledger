@@ -71,6 +71,9 @@
 #define EC_COMPONENT_LEN 32
 #define EC_PUB_KEY_LEN (1 + (EC_COMPONENT_LEN * 2))
 
+#define EVT_SIGN 0
+#define EVT_EXPORT 1
+
 unsigned char G_io_seproxyhal_spi_buffer[IO_SEPROXYHAL_BUFFER_SIZE_B];
 uint32_t G_bip32_path[MAX_BIP32_PATH];
 uint8_t G_tmp_hash[HASH_LEN];
@@ -80,7 +83,7 @@ static void ui_idle(void);
 
 ux_state_t ux;
 
-void keycard_do_sign(unsigned char* apdu, unsigned int *tx) {
+unsigned short keycard_do_sign(unsigned char* apdu, unsigned int *tx) {
   uint8_t private_key_data[EC_COMPONENT_LEN];
   cx_ecfp_private_key_t private_key;
   cx_ecfp_public_key_t public_key;
@@ -104,32 +107,51 @@ void keycard_do_sign(unsigned char* apdu, unsigned int *tx) {
   *tx += signature_len;
 
   os_memset(&private_key, 0, sizeof(private_key));
+
+  return 0x9000;
 }
 
-unsigned int io_seproxyhal_touch_ok(const bagl_element_t *e) {
+unsigned short keycard_do_export(unsigned char* apdu, unsigned int *tx) {
+  return 0x9000;
+}
+
+static const bagl_element_t* io_seproxyhal_touch_ok(const bagl_element_t *e) {
   unsigned int tx = 0;
+  unsigned short sw;
 
-  keycard_do_sign(G_io_apdu_buffer, &tx);
+  switch (e->component.userid) {
+    case EVT_SIGN:
+      sw = keycard_do_sign(G_io_apdu_buffer, &tx);
+      break;
+    case EVT_EXPORT:
+      sw = keycard_do_export(G_io_apdu_buffer, &tx);
+      break;
+    default:
+      sw = 0x6F00;
+  }
 
-  G_io_apdu_buffer[tx++] = 0x90;
-  G_io_apdu_buffer[tx++] = 0x00;
+  G_io_apdu_buffer[tx++] = sw >> 8;
+  G_io_apdu_buffer[tx++] = sw;
 
   // Send back the response, do not restart the event loop
   io_exchange(CHANNEL_APDU | IO_RETURN_AFTER_TX, tx);
 
   ui_idle();
 
-  return 0;
+  return NULL;
 }
 
-unsigned int io_seproxyhal_touch_cancel(const bagl_element_t *e) {
+static const bagl_element_t* io_seproxyhal_touch_cancel(const bagl_element_t *e) {
+  UNUSED(e);
+
   G_io_apdu_buffer[0] = 0x69;
   G_io_apdu_buffer[1] = 0x85;
 
   io_exchange(CHANNEL_APDU | IO_RETURN_AFTER_TX, 2);
 
   ui_idle();
-  return 0;
+
+  return NULL;
 }
 
 static const bagl_element_t *io_seproxyhal_touch_exit(const bagl_element_t *e) {
@@ -173,29 +195,49 @@ const ux_menu_entry_t menu_main[] = {
   UX_MENU_END
 };
 
+unsigned int ui_nanos_button_handler(unsigned int button_mask, const bagl_element_t* element) {
+  switch(button_mask) {
+    case BUTTON_EVT_RELEASED | BUTTON_LEFT:
+      io_seproxyhal_touch_cancel(element);
+      break;
+
+    case BUTTON_EVT_RELEASED | BUTTON_RIGHT: {
+      io_seproxyhal_touch_ok(element);
+      break;
+    }
+  }
+
+  return 0;
+}
+
 const bagl_element_t ui_sign_nanos[] = {
   // {{type, userid, x, y, width, height, stroke, radius, fill, fgcolor, bgcolor, font_id, icon_id}, text, touch_area_brim, overfgcolor, overbgcolor, tap, out, over }
   {{BAGL_RECTANGLE, 0x00, 0, 0, 128, 32, 0, 0, BAGL_FILL, 0x000000, 0xFFFFFF, 0, 0}, NULL, 0, 0, 0, NULL, NULL, NULL},
   {{BAGL_ICON, 0x00, 3, 12, 7, 7, 0, 0, 0, 0xFFFFFF, 0x000000, 0, BAGL_GLYPH_ICON_CROSS }, NULL, 0, 0, 0, NULL, NULL, NULL},
   {{BAGL_ICON, 0x00, 117,  13, 8, 6, 0, 0, 0, 0xFFFFFF, 0x000000, 0, BAGL_GLYPH_ICON_CHECK }, NULL, 0, 0, 0, NULL, NULL, NULL},
 
-  {{BAGL_LABELINE, 0x01, 0, 12, 128, 32, 0, 0, 0, 0xFFFFFF, 0x000000, BAGL_FONT_OPEN_SANS_EXTRABOLD_11px|BAGL_FONT_ALIGNMENT_CENTER, 0  }, "Sign", 0, 0, 0, NULL, NULL, NULL},
-  {{BAGL_LABELINE, 0x01, 0, 26, 128, 32, 0, 0, 0, 0xFFFFFF, 0x000000, BAGL_FONT_OPEN_SANS_EXTRABOLD_11px|BAGL_FONT_ALIGNMENT_CENTER, 0  }, "transaction?", 0, 0, 0, NULL, NULL, NULL},
+  {{BAGL_LABELINE, EVT_SIGN, 0, 12, 128, 32, 0, 0, 0, 0xFFFFFF, 0x000000, BAGL_FONT_OPEN_SANS_EXTRABOLD_11px|BAGL_FONT_ALIGNMENT_CENTER, 0  }, "Sign", 0, 0, 0, NULL, NULL, NULL},
+  {{BAGL_LABELINE, EVT_SIGN, 0, 26, 128, 32, 0, 0, 0, 0xFFFFFF, 0x000000, BAGL_FONT_OPEN_SANS_EXTRABOLD_11px|BAGL_FONT_ALIGNMENT_CENTER, 0  }, "transaction?", 0, 0, 0, NULL, NULL, NULL},
 };
 
 unsigned int ui_sign_nanos_button(unsigned int button_mask, unsigned int button_mask_counter) {
-  switch(button_mask) {
-    case BUTTON_EVT_RELEASED | BUTTON_LEFT:
-      io_seproxyhal_touch_cancel(NULL);
-      break;
+  UNUSED(button_mask_counter);
+  return ui_nanos_button_handler(button_mask, &ui_sign_nanos[3]);
+}
 
-    case BUTTON_EVT_RELEASED | BUTTON_RIGHT: {
-		  io_seproxyhal_touch_ok(NULL);
-      break;
-    }
-  }
+const bagl_element_t ui_export_key_nanos[] = {
+  // {{type, userid, x, y, width, height, stroke, radius, fill, fgcolor, bgcolor, font_id, icon_id}, text, touch_area_brim, overfgcolor, overbgcolor, tap, out, over }
+  {{BAGL_RECTANGLE, 0x00, 0, 0, 128, 32, 0, 0, BAGL_FILL, 0x000000, 0xFFFFFF, 0, 0}, NULL, 0, 0, 0, NULL, NULL, NULL},
+  {{BAGL_ICON, 0x00, 3, 12, 7, 7, 0, 0, 0, 0xFFFFFF, 0x000000, 0, BAGL_GLYPH_ICON_CROSS }, NULL, 0, 0, 0, NULL, NULL, NULL},
+  {{BAGL_ICON, 0x00, 117,  13, 8, 6, 0, 0, 0, 0xFFFFFF, 0x000000, 0, BAGL_GLYPH_ICON_CHECK }, NULL, 0, 0, 0, NULL, NULL, NULL},
 
-  return 0;
+  {{BAGL_LABELINE, EVT_EXPORT, 0, 12, 128, 32, 0, 0, 0, 0xFFFFFF, 0x000000, BAGL_FONT_OPEN_SANS_EXTRABOLD_11px|BAGL_FONT_ALIGNMENT_CENTER, 0  }, "Export", 0, 0, 0, NULL, NULL, NULL},
+  {{BAGL_LABELINE, EVT_EXPORT, 0, 26, 128, 32, 0, 0, 0, 0xFFFFFF, 0x000000, BAGL_FONT_OPEN_SANS_EXTRABOLD_11px|BAGL_FONT_ALIGNMENT_CENTER, 0  }, "EIP-1581 key?", 0, 0, 0, NULL, NULL, NULL},
+};
+
+unsigned int ui_export_key_nanos_button(unsigned int button_mask, unsigned int button_mask_counter) {
+  UNUSED(button_mask_counter);
+  return ui_nanos_button_handler(button_mask, &ui_export_key_nanos[3]);
 }
 
 unsigned short io_exchange_al(unsigned char channel, unsigned short tx_len) {
