@@ -139,7 +139,7 @@ unsigned short keycard_do_export(unsigned char* apdu, volatile unsigned int *tx)
   cx_ecfp_private_key_t private_key;
   cx_ecfp_public_key_t public_key;
 
-  keycard_derive_key(G_bip32_path, G_bip32_path_len, &private_key, &public_key);
+  keycard_derive_key(G_tmp_bip32_path, G_tmp_bip32_path_len, &private_key, &public_key);
 
   apdu[(*tx)++] = TLV_KEY_TEMPLATE;
   apdu[(*tx)++] = 2 + EC_PUB_KEY_LEN;
@@ -159,7 +159,7 @@ unsigned short keycard_do_export(unsigned char* apdu, volatile unsigned int *tx)
   *tx += EC_PUB_KEY_LEN;
 
   if (G_tmp_export_make_current) {
-    os_memmove(G_bip32_path, G_tmp_bip32_path, G_tmp_bip32_path_len);
+    os_memmove(G_bip32_path, G_tmp_bip32_path, (G_tmp_bip32_path_len * 4));
     G_bip32_path_len = G_tmp_bip32_path_len;
   }
 
@@ -179,6 +179,7 @@ static const bagl_element_t* io_seproxyhal_touch_ok(const bagl_element_t *e) {
       break;
     default:
       sw = 0x6F00;
+      break;
   }
 
   G_io_apdu_buffer[tx++] = sw >> 8;
@@ -373,10 +374,10 @@ void keycard_copy_path(uint8_t mode, const uint8_t* src, int src_len, uint32_t* 
       bip32_offset = 0;
       break;
     case DERIVE_KEY_P1_PARENT:
-      bip32_offset = G_bip32_path_len - 1;
+      bip32_offset = (*dst_len) - 1;
       break;
     case DERIVE_KEY_P1_CURRENT:
-      bip32_offset = G_bip32_path_len;
+      bip32_offset = *dst_len;
       break;
     default:
       THROW(0x6A86);
@@ -431,9 +432,8 @@ inline void validate_eip_1581_path(const uint32_t* path, int len) {
   }
 }
 
-
 void keycard_export(unsigned char* apdu, volatile unsigned int *flags, volatile unsigned int *tx) {
-  os_memmove(G_tmp_bip32_path, G_bip32_path, G_bip32_path_len);
+  os_memmove(G_tmp_bip32_path, G_bip32_path, (G_bip32_path_len * 4));
   G_tmp_bip32_path_len = G_bip32_path_len;
 
   G_tmp_export_make_current = 0;
@@ -444,7 +444,7 @@ void keycard_export(unsigned char* apdu, volatile unsigned int *flags, volatile 
     case EXPORT_KEY_P1_DERIVE_AND_MAKE_CURRENT:
       G_tmp_export_make_current = 1;
     case EXPORT_KEY_P1_DERIVE:
-      keycard_copy_path(apdu[OFFSET_P1] & DERIVE_KEY_P1_MASK, &apdu[OFFSET_CDATA], apdu[OFFSET_LC], G_tmp_bip32_path, &G_tmp_bip32_path_len);
+      keycard_copy_path((apdu[OFFSET_P1] & DERIVE_KEY_P1_MASK), &apdu[OFFSET_CDATA], apdu[OFFSET_LC], G_tmp_bip32_path, &G_tmp_bip32_path_len);
       break;
     default:
       THROW(0x6A86);
@@ -465,7 +465,8 @@ void keycard_export(unsigned char* apdu, volatile unsigned int *flags, volatile 
   }
 
   if (G_tmp_export_public_only) {
-    THROW(keycard_do_export(apdu, tx));
+    unsigned short sw = keycard_do_export(apdu, tx);
+    THROW(sw);
   } else {
     #if defined(TARGET_BLUE)
     // TODO: implement Ledger Blue UI
