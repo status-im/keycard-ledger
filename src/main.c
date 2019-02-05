@@ -88,7 +88,7 @@ int G_bip32_path_len = 0;
 
 uint32_t G_tmp_bip32_path[MAX_BIP32_PATH];
 int G_tmp_bip32_path_len = 0;
-uint8_t G_tmp_export_public_only = 1;
+uint8_t G_tmp_export_public_only = 0;
 uint8_t G_tmp_export_make_current = 0;
 
 uint8_t G_tmp_hash[HASH_LEN];
