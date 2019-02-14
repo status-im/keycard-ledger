@@ -72,16 +72,43 @@
 #define TLV_APPLICATION_INFO_TEMPLATE 0xA4
 #define TLV_UID 0x8F
 #define TLV_KEY_UID 0x8E
+#define TLV_CAPABILITIES 0x8D
 
+#define CAPABILITIES_SECURE_CHANNEL 0x01
+
+#define UID_LENGTH 16
 #define MAX_BIP32_PATH 10
 #define HASH_LEN 32
 #define EC_COMPONENT_LEN 32
 #define EC_PUB_KEY_LEN (1 + (EC_COMPONENT_LEN * 2))
 
+#define SC_SECRET_LENGTH 32
+#define SC_MAX_PAIRINGS 5
+#define SC_PAIRING_KEY_LEN (SC_SECRET_LENGTH + 1)
+#define SC_PAIRING_ARRAY_LEN (SC_PAIRING_KEY_LEN * SC_MAX_PAIRINGS)
+
 #define EVT_SIGN 0
 #define EVT_EXPORT 1
 
+#define INSTANCE_AID_LEN 9
+
+typedef struct internalStorage_t {
+  uint8_t pairings[SC_PAIRING_ARRAY_LEN];
+  uint8_t instance_uid[UID_LENGTH];
+  uint8_t initialized;
+} internalStorage_t;
+
+internalStorage_t N_storage_real;
+#define N_storage (*(internalStorage_t*) PIC(&N_storage_real))
+
+const uint8_t C_instance_aid[] = { 0xA0, 0x00, 0x00, 0x08, 0x04, 0x00, 0x01, 0x01, 0x01 };
+
 unsigned char G_io_seproxyhal_spi_buffer[IO_SEPROXYHAL_BUFFER_SIZE_B];
+
+cx_ecfp_private_key_t G_secure_channel_private_key;
+cx_ecfp_public_key_t G_secure_channel_public_key;
+
+uint8_t G_key_uid[HASH_LEN];
 
 uint32_t G_bip32_path[MAX_BIP32_PATH];
 int G_bip32_path_len = 0;
@@ -93,10 +120,21 @@ uint8_t G_tmp_export_make_current = 0;
 
 uint8_t G_tmp_hash[HASH_LEN];
 
-
 static void ui_idle(void);
 
 ux_state_t ux;
+
+uint8_t secure_channel_available_pairings() {
+  uint8_t count = 0;
+
+  for (int i = 0; i < SC_PAIRING_ARRAY_LEN; i += SC_PAIRING_KEY_LEN) {
+    if (N_storage.pairings[i] == 0) {
+      count++;
+    }
+  }
+
+  return count;
+}
 
 void keycard_derive_key(uint32_t* path, int path_len, cx_ecfp_private_key_t* private_key, cx_ecfp_public_key_t* public_key) {
   uint8_t private_key_data[EC_COMPONENT_LEN];
@@ -126,11 +164,10 @@ unsigned short keycard_do_sign(unsigned char* apdu, volatile unsigned int *tx) {
   *tx += EC_PUB_KEY_LEN;
 
   int signature_len = cx_ecdsa_sign(&private_key, CX_RND_RFC6979 | CX_LAST, CX_SHA256, G_tmp_hash, HASH_LEN, &apdu[*tx], NULL);
+  os_memset(&private_key, 0, sizeof(private_key));
 
   apdu[1] += signature_len;
   *tx += signature_len;
-
-  os_memset(&private_key, 0, sizeof(private_key));
 
   return 0x9000;
 }
@@ -152,6 +189,8 @@ unsigned short keycard_do_export(unsigned char* apdu, volatile unsigned int *tx)
     os_memmove(&apdu[*tx], private_key.d, EC_COMPONENT_LEN);
     *tx += EC_COMPONENT_LEN;
   }
+
+  os_memset(&private_key, 0, sizeof(private_key));
 
   apdu[(*tx)++] = TLV_PUB_KEY;
   apdu[(*tx)++] = EC_PUB_KEY_LEN;
@@ -395,6 +434,52 @@ void keycard_copy_path(uint8_t mode, const uint8_t* src, int src_len, uint32_t* 
   *dst_len = bip32_offset;
 }
 
+void keycard_select(unsigned char* apdu, volatile unsigned int *flags, volatile unsigned int *tx) {
+  UNUSED(flags);
+
+  if (apdu[OFFSET_P1] != 0x04 || apdu[OFFSET_P2] != 0x00) {
+    THROW(0x6A81);
+  }
+
+  if (apdu[OFFSET_LC] != INSTANCE_AID_LEN || os_memcmp(&apdu[OFFSET_CDATA], C_instance_aid, INSTANCE_AID_LEN) != 0) {
+    THROW(0x6A84);
+  }
+
+  apdu[(*tx)++] = TLV_APPLICATION_INFO_TEMPLATE;
+  apdu[(*tx)++] = 0x81;
+  apdu[(*tx)++] = UID_LENGTH + HASH_LEN + EC_PUB_KEY_LEN + 16;
+
+  apdu[(*tx)++] = TLV_UID;
+  apdu[(*tx)++] = UID_LENGTH;
+  os_memmove(&apdu[*tx], N_storage.instance_uid, UID_LENGTH);
+  *tx += UID_LENGTH;
+
+  apdu[(*tx)++] = TLV_PUB_KEY;
+  apdu[(*tx)++] = EC_PUB_KEY_LEN;
+  os_memmove(&apdu[*tx], G_secure_channel_public_key.W, EC_PUB_KEY_LEN);
+  *tx += EC_PUB_KEY_LEN;
+
+  apdu[(*tx)++] = TLV_INT;
+  apdu[(*tx)++] = 2;
+  apdu[(*tx)++] = APPMAJOR;
+  apdu[(*tx)++] = APPMINOR;
+
+  apdu[(*tx)++] = TLV_INT;
+  apdu[(*tx)++] = 1;
+  apdu[(*tx)++] = secure_channel_available_pairings();
+
+  apdu[(*tx)++] = TLV_KEY_UID;
+  apdu[(*tx)++] = HASH_LEN;
+  os_memmove(&apdu[*tx], G_key_uid, HASH_LEN);
+  *tx += HASH_LEN;
+
+  apdu[(*tx)++] = TLV_CAPABILITIES;
+  apdu[(*tx)++] = 1;
+  apdu[(*tx)++] = CAPABILITIES_SECURE_CHANNEL;
+
+  THROW(0x9000);
+}
+
 void keycard_derive(unsigned char* apdu, volatile unsigned int *flags, volatile unsigned int *tx) {
   UNUSED(flags);
   UNUSED(tx);
@@ -478,6 +563,26 @@ void keycard_export(unsigned char* apdu, volatile unsigned int *flags, volatile 
   }
 }
 
+void keycard_generate_key_uid() {
+  cx_ecfp_private_key_t private_key;
+  cx_ecfp_public_key_t public_key;
+
+  keycard_derive_key(G_tmp_bip32_path, 0, &private_key, &public_key);
+  os_memset(&private_key, 0, sizeof(private_key));
+
+  cx_hash_sha256(public_key.W, EC_PUB_KEY_LEN, G_key_uid);
+}
+
+void keycard_init_nvm() {
+  if (N_storage.initialized != 0x01) {
+    internalStorage_t storage;
+    os_memset(storage.pairings, 0, SC_PAIRING_ARRAY_LEN);
+    cx_rng(storage.instance_uid, UID_LENGTH);
+    storage.initialized = 0x01;
+    nvm_write(&N_storage, (void*)&storage, sizeof(internalStorage_t));
+  }
+}
+
 static void runloop(void) {
   volatile unsigned int rx = 0;
   volatile unsigned int tx = 0;
@@ -508,43 +613,13 @@ static void runloop(void) {
 
         switch (G_io_apdu_buffer[OFFSET_INS]) {
           case INS_SELECT:
-            THROW(0x6A81);
+            keycard_select(G_io_apdu_buffer, &flags, &tx);
             break;
           case INS_GET_STATUS:
             keycard_get_status(G_io_apdu_buffer, &flags, &tx);
             break;
-          case INS_SET_NDEF:
-            THROW(0x6A81);
-            break;
-          case INS_INIT:
-            THROW(0x6A81);
-            break;
-          case INS_VERIFY_PIN:
-            THROW(0x6A81);
-            break;
-          case INS_CHANGE_PIN:
-            THROW(0x6A81);
-            break;
-          case INS_UNBLOCK_PIN:
-            THROW(0x6A81);
-            break;
-          case INS_LOAD_KEY:
-            THROW(0x6A81);
-            break;
           case INS_DERIVE_KEY:
             keycard_derive(G_io_apdu_buffer, &flags, &tx);
-            break;
-          case INS_GENERATE_MNEMONIC:
-            THROW(0x6A81);
-            break;
-          case INS_REMOVE_KEY:
-            THROW(0x6A81);
-            break;
-          case INS_GENERATE_KEY:
-            THROW(0x6A81);
-            break;
-          case INS_DUPLICATE_KEY:
-            THROW(0x6A81);
             break;
           case INS_SIGN:
             keycard_sign(G_io_apdu_buffer, &flags, &tx);
@@ -554,6 +629,18 @@ static void runloop(void) {
             break;
           case INS_EXPORT_KEY:
             keycard_export(G_io_apdu_buffer, &flags, &tx);
+            break;
+          case INS_INIT:
+          case INS_VERIFY_PIN:
+          case INS_CHANGE_PIN:
+          case INS_UNBLOCK_PIN:
+          case INS_LOAD_KEY:
+          case INS_GENERATE_MNEMONIC:
+          case INS_REMOVE_KEY:
+          case INS_GENERATE_KEY:
+          case INS_DUPLICATE_KEY:
+          case INS_SET_NDEF:
+            THROW(0x6A81);
             break;
           default:
             THROW(0x6D00);
@@ -637,6 +724,10 @@ __attribute__((section(".boot"))) int main(void) {
   BEGIN_TRY {
     TRY {
       io_seproxyhal_init();
+
+      cx_ecfp_generate_pair(CX_CURVE_256K1, &G_secure_channel_public_key, &G_secure_channel_private_key, 0);
+      keycard_generate_key_uid();
+      keycard_init_nvm();
 
       #ifdef LISTEN_BLE
       if (os_seph_features() & SEPROXYHAL_TAG_SESSION_START_EVENT_FEATURE_BLE) {

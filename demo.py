@@ -17,6 +17,7 @@
 #********************************************************************************
 from ledgerblue.comm import getDongle
 dongle = getDongle(True)
+dongle.exchange(bytes("00A4040009A00000080400010101".decode('hex')))
 dongle.exchange(bytes("80F2000000".decode('hex')))
 dongle.exchange(bytes("80F2010000".decode('hex')))
 dongle.exchange(bytes("80D10000148000002B8000003C8000062D8000000000000000".decode('hex')))
