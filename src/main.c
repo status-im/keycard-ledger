@@ -86,6 +86,7 @@
 #define SC_MAX_PAIRINGS 5
 #define SC_PAIRING_KEY_LEN (SC_SECRET_LENGTH + 1)
 #define SC_PAIRING_ARRAY_LEN (SC_PAIRING_KEY_LEN * SC_MAX_PAIRINGS)
+#define SC_PAIRING_PASS_LEN 6
 
 #define EVT_SIGN 0
 #define EVT_EXPORT 1
@@ -110,6 +111,9 @@ cx_ecfp_public_key_t G_secure_channel_public_key;
 
 uint8_t G_key_uid[HASH_LEN];
 
+uint8_t G_sc_secret[SC_SECRET_LENGTH];
+char G_sc_pairing_password[SC_PAIRING_PASS_LEN + 1];
+
 uint32_t G_bip32_path[MAX_BIP32_PATH];
 int G_bip32_path_len = 0;
 
@@ -124,17 +128,7 @@ static void ui_idle(void);
 
 ux_state_t ux;
 
-uint8_t secure_channel_available_pairings() {
-  uint8_t count = 0;
-
-  for (int i = 0; i < SC_PAIRING_ARRAY_LEN; i += SC_PAIRING_KEY_LEN) {
-    if (N_storage.pairings[i] == 0) {
-      count++;
-    }
-  }
-
-  return count;
-}
+void sc_generate_pairing_password();
 
 void keycard_derive_key(uint32_t* path, int path_len, cx_ecfp_private_key_t* private_key, cx_ecfp_public_key_t* public_key) {
   uint8_t private_key_data[EC_COMPONENT_LEN];
@@ -245,6 +239,8 @@ static const bagl_element_t* io_seproxyhal_touch_cancel(const bagl_element_t *e)
   return NULL;
 }
 
+#if defined(TARGET_BLUE)
+
 static const bagl_element_t *io_seproxyhal_touch_exit(const bagl_element_t *e) {
   // Go back to the dashboard
   os_sched_exit(0);
@@ -267,6 +263,7 @@ static unsigned int ui_idle_blue_button(unsigned int button_mask, unsigned int b
   return 0;
 }
 
+#elif defined(TARGET_NANOS)
 // ********************************************************************************
 // Ledger Nano S specific UI
 // ********************************************************************************
@@ -282,6 +279,7 @@ const ux_menu_entry_t menu_about[] = {
 const ux_menu_entry_t menu_main[] = {
   {NULL, NULL, 0, NULL, "Keycard", "by Status", 0, 0},
   {menu_about, NULL, 0, NULL, "About", NULL, 0, 0},
+  {NULL, sc_generate_pairing_password, 0, NULL, "Pairing password", NULL, 0, 0},
   {NULL, os_sched_exit, 0, &C_icon_dashboard, "Quit app", NULL, 50, 29},
   UX_MENU_END
 };
@@ -331,6 +329,23 @@ unsigned int ui_export_key_nanos_button(unsigned int button_mask, unsigned int b
   return ui_nanos_button_handler(button_mask, &ui_export_key_nanos[3]);
 }
 
+const bagl_element_t ui_pair_nanos[] = {
+  // {{type, userid, x, y, width, height, stroke, radius, fill, fgcolor, bgcolor, font_id, icon_id}, text, touch_area_brim, overfgcolor, overbgcolor, tap, out, over }
+  {{BAGL_RECTANGLE, 0x00, 0, 0, 128, 32, 0, 0, BAGL_FILL, 0x000000, 0xFFFFFF, 0, 0}, NULL, 0, 0, 0, NULL, NULL, NULL},
+
+  {{BAGL_LABELINE, 0x00, 0, 12, 128, 32, 0, 0, 0, 0xFFFFFF, 0x000000, BAGL_FONT_OPEN_SANS_EXTRABOLD_11px|BAGL_FONT_ALIGNMENT_CENTER, 0  }, "Pairing password", 0, 0, 0, NULL, NULL, NULL},
+  {{BAGL_LABELINE, 0x00, 0, 26, 128, 32, 0, 0, 0, 0xFFFFFF, 0x000000, BAGL_FONT_OPEN_SANS_EXTRABOLD_11px|BAGL_FONT_ALIGNMENT_CENTER, 0  }, G_sc_pairing_password, 0, 0, 0, NULL, NULL, NULL},
+};
+
+unsigned int ui_pair_nanos_button(unsigned int button_mask, unsigned int button_mask_counter) {
+  UNUSED(button_mask);
+  UNUSED(button_mask_counter);
+
+  UX_MENU_DISPLAY(0, menu_main, NULL);
+  return 0;
+}
+#endif
+
 unsigned short io_exchange_al(unsigned char channel, unsigned short tx_len) {
   switch (channel & ~(IO_FLAGS)) {
     case CHANNEL_KEYBOARD:
@@ -357,11 +372,41 @@ unsigned short io_exchange_al(unsigned char channel, unsigned short tx_len) {
 }
 
 static void ui_idle(void) {
-  if (os_seph_features() & SEPROXYHAL_TAG_SESSION_START_EVENT_FEATURE_SCREEN_BIG) {
-    UX_DISPLAY(ui_idle_blue, NULL);
-  } else {
-    UX_MENU_DISPLAY(0, menu_main, NULL);
+  #if defined(TARGET_BLUE)
+  UX_DISPLAY(ui_idle_blue, NULL);
+  #elif defined(TARGET_NANOS)
+  UX_MENU_DISPLAY(0, menu_main, NULL);
+  #endif
+}
+
+uint8_t sc_available_pairings() {
+  uint8_t count = 0;
+
+  for (int i = 0; i < SC_PAIRING_ARRAY_LEN; i += SC_PAIRING_KEY_LEN) {
+    if (N_storage.pairings[i] == 0) {
+      count++;
+    }
   }
+
+  return count;
+}
+
+void sc_generate_pairing_password() {
+  cx_rng((unsigned char *) G_sc_pairing_password, SC_PAIRING_PASS_LEN);
+
+  for (int i = 0; i < SC_PAIRING_PASS_LEN; i++) {
+    G_sc_pairing_password[i] = '0' + (G_sc_pairing_password[i] % 10);
+  }
+
+  G_sc_pairing_password[SC_PAIRING_PASS_LEN] = '\0';
+
+  //cx_pbkdf2_sha512((unsigned char *) G_sc_pairing_password, SC_PAIRING_PASS_LEN, salt, sizeof(salt), 10, G_sc_secret, SC_SECRET_LENGTH);
+
+  #if defined(TARGET_BLUE)
+  // TODO: implement Ledger Blue UI
+  #elif defined(TARGET_NANOS)
+  UX_DISPLAY(ui_pair_nanos, NULL);
+  #endif
 }
 
 void keycard_get_status_app(unsigned char* apdu, volatile unsigned int *tx) {
@@ -466,7 +511,7 @@ void keycard_select(unsigned char* apdu, volatile unsigned int *flags, volatile 
 
   apdu[(*tx)++] = TLV_INT;
   apdu[(*tx)++] = 1;
-  apdu[(*tx)++] = secure_channel_available_pairings();
+  apdu[(*tx)++] = sc_available_pairings();
 
   apdu[(*tx)++] = TLV_KEY_UID;
   apdu[(*tx)++] = HASH_LEN;
@@ -725,6 +770,7 @@ __attribute__((section(".boot"))) int main(void) {
     TRY {
       io_seproxyhal_init();
 
+      cx_rng(G_sc_secret, SC_SECRET_LENGTH);
       cx_ecfp_generate_pair(CX_CURVE_256K1, &G_secure_channel_public_key, &G_secure_channel_private_key, 0);
       keycard_generate_key_uid();
       keycard_init_nvm();
