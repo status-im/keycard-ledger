@@ -391,6 +391,26 @@ uint8_t sc_available_pairings() {
   return count;
 }
 
+// This implementation assumes that the output size matches the key size.
+void sc_pbkdf2_sha256(const char *pass, size_t pass_len, uint8_t *asalt, size_t salt_len, unsigned int rounds, uint8_t obuf[HASH_LEN]) {
+	uint8_t d1[HASH_LEN];
+  uint8_t d2[HASH_LEN];
+
+	cx_hmac_sha256((unsigned char *) pass, pass_len, asalt, salt_len, d1);
+	os_memmove(obuf, d1, HASH_LEN);
+
+	for (unsigned int i = 1; i < rounds; i++) {
+		cx_hmac_sha256((unsigned char *) pass, pass_len, d1, HASH_LEN, d2);
+		os_memmove(d1, d2, HASH_LEN);
+		for (unsigned int j = 0; j < HASH_LEN; j++) {
+			obuf[j] ^= d1[j];
+    }
+	}
+
+	os_memset(d1, 0, HASH_LEN);
+  os_memset(d2, 0, HASH_LEN);
+}
+
 void sc_generate_pairing_password() {
   cx_rng((unsigned char *) G_sc_pairing_password, SC_PAIRING_PASS_LEN);
 
@@ -400,7 +420,10 @@ void sc_generate_pairing_password() {
 
   G_sc_pairing_password[SC_PAIRING_PASS_LEN] = '\0';
 
-  //cx_pbkdf2_sha512((unsigned char *) G_sc_pairing_password, SC_PAIRING_PASS_LEN, salt, sizeof(salt), 10, G_sc_secret, SC_SECRET_LENGTH);
+  uint8_t salt[] = "Keycard Pairing Password Salt\0\0\0\1";
+  sc_pbkdf2_sha256(G_sc_pairing_password, SC_PAIRING_PASS_LEN, salt, sizeof(salt), 500, G_sc_secret);
+
+  //PRINTF("Secret:\n %.*H \n\n", SC_SECRET_LENGTH, G_sc_secret);
 
   #if defined(TARGET_BLUE)
   // TODO: implement Ledger Blue UI
