@@ -46,6 +46,11 @@
 #define INS_SET_PINLESS_PATH 0xC1
 #define INS_EXPORT_KEY 0xC2
 
+#define INS_OPEN_SECURE_CHANNEL 0x10
+#define INS_MUTUALLY_AUTHENTICATE 0x11
+#define INS_PAIR 0x12
+#define INS_UNPAIR 0x13
+
 #define DERIVE_KEY_P1_MASTER 0x00
 #define DERIVE_KEY_P1_PARENT 0x40
 #define DERIVE_KEY_P1_CURRENT 0x80
@@ -59,6 +64,9 @@
 
 #define GET_STATUS_P1_APP_STATUS 0x00
 #define GET_STATUS_P1_APP_KEYPATH 0x01
+
+#define PAIR_P1_FIRST_STEP 0x00
+#define PAIR_P1_LAST_STEP 0x01
 
 #define TLV_SIGNATURE_TEMPLATE 0xA0
 #define TLV_KEY_TEMPLATE 0xA1
@@ -113,6 +121,8 @@ uint8_t G_key_uid[HASH_LEN];
 
 uint8_t G_sc_secret[SC_SECRET_LENGTH];
 char G_sc_pairing_password[SC_PAIRING_PASS_LEN + 1];
+int8_t G_sc_preallocated_offset;
+uint8_t G_sc_card_cryptogram[SC_SECRET_LENGTH];
 
 uint32_t G_bip32_path[MAX_BIP32_PATH];
 int G_bip32_path_len = 0;
@@ -391,6 +401,19 @@ uint8_t sc_available_pairings() {
   return count;
 }
 
+uint8_t sc_preallocate_pairing_index() {
+  G_sc_preallocated_offset = -1;
+
+  for (int i = 0; i < SC_PAIRING_ARRAY_LEN; i += SC_PAIRING_KEY_LEN) {
+    if (N_storage.pairings[i] == 0) {
+      G_sc_preallocated_offset = i;
+      return 1;
+    }
+  }
+
+  return 0;
+}
+
 // This implementation assumes that the output size matches the key size.
 void sc_pbkdf2_sha256(const char *pass, size_t pass_len, uint8_t *asalt, size_t salt_len, unsigned int rounds, uint8_t obuf[HASH_LEN]) {
 	uint8_t d1[HASH_LEN];
@@ -430,6 +453,76 @@ void sc_generate_pairing_password() {
   #elif defined(TARGET_NANOS)
   UX_DISPLAY(ui_pair_nanos, NULL);
   #endif
+}
+
+void sc_pair_step1(unsigned char* apdu, volatile unsigned int *flags, volatile unsigned int *tx) {
+  if (!sc_preallocate_pairing_index()) {
+    THROW(0x6A84);
+  }
+
+  cx_sha256_t sha256;
+  cx_sha256_init(&sha256);
+  cx_hash((cx_hash_t *) &sha256, 0, G_sc_secret, SC_SECRET_LENGTH, NULL);
+  cx_hash((cx_hash_t *) &sha256, CX_LAST, &apdu[OFFSET_CDATA], SC_SECRET_LENGTH, apdu);
+  cx_rng(&apdu[HASH_LEN], HASH_LEN);
+  *tx = (HASH_LEN * 2);
+
+  cx_sha256_init(&sha256);
+  cx_hash((cx_hash_t *) &sha256, 0, G_sc_secret, SC_SECRET_LENGTH, NULL);
+  cx_hash((cx_hash_t *) &sha256, CX_LAST, &apdu[HASH_LEN], SC_SECRET_LENGTH, G_sc_card_cryptogram);
+}
+
+void sc_pair_step2(unsigned char* apdu, volatile unsigned int *flags, volatile unsigned int *tx) {
+  if (G_sc_preallocated_offset == -1) {
+    THROW(0x6A86);
+  }
+
+  if (os_memcmp(&apdu[OFFSET_CDATA], C_instance_aid, INSTANCE_AID_LEN) != 0) {
+    THROW(0x6982);
+  }
+
+  apdu[0] = (G_sc_preallocated_offset / SC_PAIRING_KEY_LEN);
+  uint8_t pairing[SC_PAIRING_KEY_LEN];
+  pairing[0] = 1;
+
+  cx_rng(&apdu[1], HASH_LEN);
+
+  cx_sha256_t sha256;
+  cx_sha256_init(&sha256);
+  cx_hash((cx_hash_t *) &sha256, 0, G_sc_secret, SC_SECRET_LENGTH, NULL);
+  cx_hash((cx_hash_t *) &sha256, CX_LAST, &apdu[1], SC_SECRET_LENGTH, &pairing[1]);
+
+  nvm_write(&N_storage.pairings[G_sc_preallocated_offset], pairing, SC_PAIRING_KEY_LEN);
+  G_sc_preallocated_offset = 0;
+}
+
+void sc_pair(unsigned char* apdu, volatile unsigned int *flags, volatile unsigned int *tx) {
+  if (apdu[OFFSET_LC] != SC_SECRET_LENGTH) {
+    THROW(0x6A80);
+  }
+
+  switch(apdu[OFFSET_P1]) {
+    case PAIR_P1_FIRST_STEP:
+      sc_pair_step1(apdu, flags, tx);
+      break;
+    case PAIR_P1_LAST_STEP:
+      sc_pair_step2(apdu, flags, tx);
+      break;
+    default:
+      THROW(0x6A86);
+      break;
+  }
+
+  THROW(0x9000);
+}
+
+void sc_unpair(unsigned char* apdu, volatile unsigned int *flags, volatile unsigned int *tx) {
+}
+
+void sc_open_secure_channel(unsigned char* apdu, volatile unsigned int *flags, volatile unsigned int *tx) {
+}
+
+void sc_mutually_authenticate(unsigned char* apdu, volatile unsigned int *flags, volatile unsigned int *tx) {
 }
 
 void keycard_get_status_app(unsigned char* apdu, volatile unsigned int *tx) {
@@ -680,6 +773,18 @@ static void runloop(void) {
         }
 
         switch (G_io_apdu_buffer[OFFSET_INS]) {
+          case INS_PAIR:
+            sc_pair(G_io_apdu_buffer, &flags, &tx);
+            break;
+          case INS_UNPAIR:
+            sc_unpair(G_io_apdu_buffer, &flags, &tx);
+            break;
+          case INS_OPEN_SECURE_CHANNEL:
+            sc_open_secure_channel(G_io_apdu_buffer, &flags, &tx);
+            break;
+          case INS_MUTUALLY_AUTHENTICATE:
+            sc_mutually_authenticate(G_io_apdu_buffer, &flags, &tx);
+            break;
           case INS_SELECT:
             keycard_select(G_io_apdu_buffer, &flags, &tx);
             break;
@@ -793,6 +898,7 @@ __attribute__((section(".boot"))) int main(void) {
     TRY {
       io_seproxyhal_init();
 
+      G_sc_preallocated_offset = -1;
       cx_rng(G_sc_secret, SC_SECRET_LENGTH);
       cx_ecfp_generate_pair(CX_CURVE_256K1, &G_secure_channel_public_key, &G_secure_channel_private_key, 0);
       keycard_generate_key_uid();
