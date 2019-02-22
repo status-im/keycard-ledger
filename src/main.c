@@ -90,11 +90,16 @@
 #define EC_COMPONENT_LEN 32
 #define EC_PUB_KEY_LEN (1 + (EC_COMPONENT_LEN * 2))
 
+#define SC_IV_LEN 16
 #define SC_SECRET_LENGTH 32
 #define SC_MAX_PAIRINGS 5
 #define SC_PAIRING_KEY_LEN (SC_SECRET_LENGTH + 1)
 #define SC_PAIRING_ARRAY_LEN (SC_PAIRING_KEY_LEN * SC_MAX_PAIRINGS)
 #define SC_PAIRING_PASS_LEN 6
+
+#define SC_STATE_CLOSED 0
+#define SC_STATE_OPENING 1
+#define SC_STATE_OPEN 2
 
 #define EVT_SIGN 0
 #define EVT_EXPORT 1
@@ -122,7 +127,8 @@ uint8_t G_key_uid[HASH_LEN];
 uint8_t G_sc_secret[SC_SECRET_LENGTH];
 char G_sc_pairing_password[SC_PAIRING_PASS_LEN + 1];
 int8_t G_sc_preallocated_offset;
-uint8_t G_sc_card_cryptogram[SC_SECRET_LENGTH];
+uint8_t G_sc_open;
+uint8_t G_sc_session_data[SC_SECRET_LENGTH * 2];
 
 uint32_t G_bip32_path[MAX_BIP32_PATH];
 int G_bip32_path_len = 0;
@@ -469,7 +475,7 @@ void sc_pair_step1(unsigned char* apdu, volatile unsigned int *flags, volatile u
 
   cx_sha256_init(&sha256);
   cx_hash((cx_hash_t *) &sha256, 0, G_sc_secret, SC_SECRET_LENGTH, NULL);
-  cx_hash((cx_hash_t *) &sha256, CX_LAST, &apdu[HASH_LEN], SC_SECRET_LENGTH, G_sc_card_cryptogram);
+  cx_hash((cx_hash_t *) &sha256, CX_LAST, &apdu[HASH_LEN], SC_SECRET_LENGTH, G_sc_session_data);
 }
 
 void sc_pair_step2(unsigned char* apdu, volatile unsigned int *flags, volatile unsigned int *tx) {
@@ -497,6 +503,10 @@ void sc_pair_step2(unsigned char* apdu, volatile unsigned int *flags, volatile u
 }
 
 void sc_pair(unsigned char* apdu, volatile unsigned int *flags, volatile unsigned int *tx) {
+  if (G_sc_open != SC_STATE_CLOSED) {
+    THROW(0x6985);
+  }
+
   if (apdu[OFFSET_LC] != SC_SECRET_LENGTH) {
     THROW(0x6A80);
   }
@@ -516,13 +526,47 @@ void sc_pair(unsigned char* apdu, volatile unsigned int *flags, volatile unsigne
   THROW(0x9000);
 }
 
+void sc_close() {
+  G_sc_open = SC_STATE_CLOSED;
+  G_sc_preallocated_offset = -1;
+}
+
 void sc_unpair(unsigned char* apdu, volatile unsigned int *flags, volatile unsigned int *tx) {
 }
 
 void sc_open_secure_channel(unsigned char* apdu, volatile unsigned int *flags, volatile unsigned int *tx) {
+  if (apdu[OFFSET_LC] != EC_PUB_KEY_LEN) {
+    THROW(0x6A80);
+  }
+
+  if ((apdu[OFFSET_P1] >= SC_MAX_PAIRINGS) || (N_storage.pairings[apdu[OFFSET_P1] * SC_PAIRING_KEY_LEN] != 1)) {
+    THROW(0x6A86);
+  }
+
+  sc_close();
+
+  uint8_t secret[EC_COMPONENT_LEN];
+
+  cx_ecdh(&G_secure_channel_private_key, CX_ECDH_X, &apdu[OFFSET_CDATA], secret);
+
+  cx_rng(apdu, (HASH_LEN + SC_IV_LEN));
+
+  cx_sha512_t sha512;
+  cx_sha512_init(&sha512);
+  cx_hash((cx_hash_t *) &sha512, 0, secret, SC_SECRET_LENGTH, NULL);
+  cx_hash((cx_hash_t *) &sha512, 0, &N_storage.pairings[(apdu[OFFSET_P1] * SC_PAIRING_KEY_LEN) + 1], SC_SECRET_LENGTH, NULL);
+  cx_hash((cx_hash_t *) &sha512, CX_LAST, apdu, SC_SECRET_LENGTH, G_sc_session_data);
+
+  *tx = (HASH_LEN + SC_IV_LEN);
+  G_sc_open = SC_STATE_OPENING;
+
+  THROW(0x9000);
 }
 
 void sc_mutually_authenticate(unsigned char* apdu, volatile unsigned int *flags, volatile unsigned int *tx) {
+  if (G_sc_open != SC_STATE_OPENING) {
+    THROW(0x6985);
+  }
 }
 
 void keycard_get_status_app(unsigned char* apdu, volatile unsigned int *tx) {
@@ -605,6 +649,8 @@ void keycard_select(unsigned char* apdu, volatile unsigned int *flags, volatile 
   if (apdu[OFFSET_LC] != INSTANCE_AID_LEN || os_memcmp(&apdu[OFFSET_CDATA], C_instance_aid, INSTANCE_AID_LEN) != 0) {
     THROW(0x6A84);
   }
+
+  sc_close();
 
   apdu[(*tx)++] = TLV_APPLICATION_INFO_TEMPLATE;
   apdu[(*tx)++] = 0x81;
@@ -898,7 +944,8 @@ __attribute__((section(".boot"))) int main(void) {
     TRY {
       io_seproxyhal_init();
 
-      G_sc_preallocated_offset = -1;
+      sc_close();
+
       cx_rng(G_sc_secret, SC_SECRET_LENGTH);
       cx_ecfp_generate_pair(CX_CURVE_256K1, &G_secure_channel_public_key, &G_secure_channel_private_key, 0);
       keycard_generate_key_uid();
