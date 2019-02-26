@@ -84,6 +84,12 @@
 
 #define CAPABILITIES_SECURE_CHANNEL 0x01
 
+#if defined(SECURE_CHANNEL)
+#define CAPABILITIES CAPABILITIES_SECURE_CHANNEL
+#else
+#define CAPABILITIES 0x00
+#endif
+
 #define UID_LENGTH 16
 #define MAX_BIP32_PATH 10
 #define HASH_LEN 32
@@ -107,7 +113,9 @@
 #define INSTANCE_AID_LEN 9
 
 typedef struct internalStorage_t {
+#if defined(SECURE_CHANNEL)
   uint8_t pairings[SC_PAIRING_ARRAY_LEN];
+#endif
   uint8_t instance_uid[UID_LENGTH];
   uint8_t initialized;
 } internalStorage_t;
@@ -119,16 +127,19 @@ const uint8_t C_instance_aid[] = { 0xA0, 0x00, 0x00, 0x08, 0x04, 0x00, 0x01, 0x0
 
 unsigned char G_io_seproxyhal_spi_buffer[IO_SEPROXYHAL_BUFFER_SIZE_B];
 
-cx_ecfp_private_key_t G_secure_channel_private_key;
-cx_ecfp_public_key_t G_secure_channel_public_key;
-
 uint8_t G_key_uid[HASH_LEN];
 
+#if defined(SECURE_CHANNEL)
+cx_ecfp_private_key_t G_sc_private_key;
+cx_ecfp_public_key_t G_sc_public_key;
 uint8_t G_sc_secret[SC_SECRET_LENGTH];
 char G_sc_pairing_password[SC_PAIRING_PASS_LEN + 1];
 int8_t G_sc_preallocated_offset;
 uint8_t G_sc_open;
-uint8_t G_sc_session_data[SC_SECRET_LENGTH * 2];
+uint8_t G_sc_session_data[SC_SECRET_LENGTH];
+cx_aes_key_t G_sc_enc_key;
+cx_aes_key_t G_sc_mac_key;
+#endif
 
 uint32_t G_bip32_path[MAX_BIP32_PATH];
 int G_bip32_path_len = 0;
@@ -143,8 +154,6 @@ uint8_t G_tmp_hash[HASH_LEN];
 static void ui_idle(void);
 
 ux_state_t ux;
-
-void sc_generate_pairing_password();
 
 void keycard_derive_key(uint32_t* path, int path_len, cx_ecfp_private_key_t* private_key, cx_ecfp_public_key_t* public_key) {
   uint8_t private_key_data[EC_COMPONENT_LEN];
@@ -295,7 +304,9 @@ const ux_menu_entry_t menu_about[] = {
 const ux_menu_entry_t menu_main[] = {
   {NULL, NULL, 0, NULL, "Keycard", "by Status", 0, 0},
   {menu_about, NULL, 0, NULL, "About", NULL, 0, 0},
+  #if defined(SECURE_CHANNEL)
   {NULL, sc_generate_pairing_password, 0, NULL, "Pairing password", NULL, 0, 0},
+  #endif
   {NULL, os_sched_exit, 0, &C_icon_dashboard, "Quit app", NULL, 50, 29},
   UX_MENU_END
 };
@@ -345,6 +356,9 @@ unsigned int ui_export_key_nanos_button(unsigned int button_mask, unsigned int b
   return ui_nanos_button_handler(button_mask, &ui_export_key_nanos[3]);
 }
 
+#if defined(SECURE_CHANNEL)
+void sc_generate_pairing_password();
+
 const bagl_element_t ui_pair_nanos[] = {
   // {{type, userid, x, y, width, height, stroke, radius, fill, fgcolor, bgcolor, font_id, icon_id}, text, touch_area_brim, overfgcolor, overbgcolor, tap, out, over }
   {{BAGL_RECTANGLE, 0x00, 0, 0, 128, 32, 0, 0, BAGL_FILL, 0x000000, 0xFFFFFF, 0, 0}, NULL, 0, 0, 0, NULL, NULL, NULL},
@@ -360,6 +374,7 @@ unsigned int ui_pair_nanos_button(unsigned int button_mask, unsigned int button_
   UX_MENU_DISPLAY(0, menu_main, NULL);
   return 0;
 }
+#endif
 #endif
 
 unsigned short io_exchange_al(unsigned char channel, unsigned short tx_len) {
@@ -395,6 +410,7 @@ static void ui_idle(void) {
   #endif
 }
 
+#if defined(SECURE_CHANNEL)
 uint8_t sc_available_pairings() {
   uint8_t count = 0;
 
@@ -418,6 +434,26 @@ uint8_t sc_preallocate_pairing_index() {
   }
 
   return 0;
+}
+
+uint8_t sc_verify_mac(unsigned char* apdu) {
+
+}
+
+uint8_t sc_decrypt_data(unsigned char* apdu) {
+
+}
+
+void sc_postprocess_apdu(unsigned char* apdu) {
+
+}
+
+void sc_preprocess_apdu(unsigned char* apdu) {
+  if (!sc_verify_mac(apdu)) {
+    THROW(0x6982);
+  }
+
+  sc_decrypt_data(apdu);
 }
 
 // This implementation assumes that the output size matches the key size.
@@ -547,15 +583,20 @@ void sc_open_secure_channel(unsigned char* apdu, volatile unsigned int *flags, v
 
   uint8_t secret[EC_COMPONENT_LEN];
 
-  cx_ecdh(&G_secure_channel_private_key, CX_ECDH_X, &apdu[OFFSET_CDATA], secret);
+  cx_ecdh(&G_sc_private_key, CX_ECDH_X, &apdu[OFFSET_CDATA], secret);
 
   cx_rng(apdu, (HASH_LEN + SC_IV_LEN));
+
+  uint8_t tmp[SC_SECRET_LENGTH * 2];
 
   cx_sha512_t sha512;
   cx_sha512_init(&sha512);
   cx_hash((cx_hash_t *) &sha512, 0, secret, SC_SECRET_LENGTH, NULL);
   cx_hash((cx_hash_t *) &sha512, 0, &N_storage.pairings[(apdu[OFFSET_P1] * SC_PAIRING_KEY_LEN) + 1], SC_SECRET_LENGTH, NULL);
-  cx_hash((cx_hash_t *) &sha512, CX_LAST, apdu, SC_SECRET_LENGTH, G_sc_session_data);
+  cx_hash((cx_hash_t *) &sha512, CX_LAST, apdu, SC_SECRET_LENGTH, tmp);
+
+  cx_aes_init_key(tmp, SC_SECRET_LENGTH, &G_sc_enc_key);
+  cx_aes_init_key(&tmp[SC_SECRET_LENGTH], SC_SECRET_LENGTH, &G_sc_mac_key);
 
   *tx = (HASH_LEN + SC_IV_LEN);
   G_sc_open = SC_STATE_OPENING;
@@ -567,7 +608,13 @@ void sc_mutually_authenticate(unsigned char* apdu, volatile unsigned int *flags,
   if (G_sc_open != SC_STATE_OPENING) {
     THROW(0x6985);
   }
+
+  cx_rng(apdu, SC_SECRET_LENGTH);
+  *tx = SC_SECRET_LENGTH;
+
+  G_sc_open = SC_STATE_OPEN;
 }
+#endif
 
 void keycard_get_status_app(unsigned char* apdu, volatile unsigned int *tx) {
   apdu[(*tx)++] = TLV_APPLICATION_STATUS_TEMPLATE;
@@ -650,11 +697,17 @@ void keycard_select(unsigned char* apdu, volatile unsigned int *flags, volatile 
     THROW(0x6A84);
   }
 
+  #if defined(SECURE_CHANNEL)
   sc_close();
+  #endif
 
   apdu[(*tx)++] = TLV_APPLICATION_INFO_TEMPLATE;
+  #if defined(SECURE_CHANNEL)
   apdu[(*tx)++] = 0x81;
   apdu[(*tx)++] = UID_LENGTH + HASH_LEN + EC_PUB_KEY_LEN + 16;
+  #else
+  apdu[(*tx)++] = UID_LENGTH + HASH_LEN + 16;
+  #endif
 
   apdu[(*tx)++] = TLV_UID;
   apdu[(*tx)++] = UID_LENGTH;
@@ -662,9 +715,14 @@ void keycard_select(unsigned char* apdu, volatile unsigned int *flags, volatile 
   *tx += UID_LENGTH;
 
   apdu[(*tx)++] = TLV_PUB_KEY;
+
+  #if defined(SECURE_CHANNEL)
   apdu[(*tx)++] = EC_PUB_KEY_LEN;
-  os_memmove(&apdu[*tx], G_secure_channel_public_key.W, EC_PUB_KEY_LEN);
+  os_memmove(&apdu[*tx], G_sc_public_key.W, EC_PUB_KEY_LEN);
   *tx += EC_PUB_KEY_LEN;
+  #else
+  apdu[(*tx)++] = 0x00;
+  #endif
 
   apdu[(*tx)++] = TLV_INT;
   apdu[(*tx)++] = 2;
@@ -673,7 +731,11 @@ void keycard_select(unsigned char* apdu, volatile unsigned int *flags, volatile 
 
   apdu[(*tx)++] = TLV_INT;
   apdu[(*tx)++] = 1;
+  #if defined(SECURE_CHANNEL)
   apdu[(*tx)++] = sc_available_pairings();
+  #else
+  apdu[(*tx)++] = 0xff;
+  #endif
 
   apdu[(*tx)++] = TLV_KEY_UID;
   apdu[(*tx)++] = HASH_LEN;
@@ -682,7 +744,7 @@ void keycard_select(unsigned char* apdu, volatile unsigned int *flags, volatile 
 
   apdu[(*tx)++] = TLV_CAPABILITIES;
   apdu[(*tx)++] = 1;
-  apdu[(*tx)++] = CAPABILITIES_SECURE_CHANNEL;
+  apdu[(*tx)++] = CAPABILITIES;
 
   THROW(0x9000);
 }
@@ -783,7 +845,9 @@ void keycard_generate_key_uid() {
 void keycard_init_nvm() {
   if (N_storage.initialized != 0x01) {
     internalStorage_t storage;
+    #if defined(SECURE_CHANNEL)
     os_memset(storage.pairings, 0, SC_PAIRING_ARRAY_LEN);
+    #endif
     cx_rng(storage.instance_uid, UID_LENGTH);
     storage.initialized = 0x01;
     nvm_write(&N_storage, (void*)&storage, sizeof(internalStorage_t));
@@ -818,7 +882,14 @@ static void runloop(void) {
           THROW(0x6982);
         }
 
+        #if defined(SECURE_CHANNEL)
+        if (G_sc_open != SC_STATE_CLOSED) {
+          sc_preprocess_apdu(G_io_apdu_buffer);
+        }
+        #endif
+
         switch (G_io_apdu_buffer[OFFSET_INS]) {
+          #if defined(SECURE_CHANNEL)
           case INS_PAIR:
             sc_pair(G_io_apdu_buffer, &flags, &tx);
             break;
@@ -831,6 +902,14 @@ static void runloop(void) {
           case INS_MUTUALLY_AUTHENTICATE:
             sc_mutually_authenticate(G_io_apdu_buffer, &flags, &tx);
             break;
+          #else
+          case INS_PAIR:
+          case INS_UNPAIR:
+          case INS_OPEN_SECURE_CHANNEL:
+          case INS_MUTUALLY_AUTHENTICATE:
+            THROW(0x6A81);
+            break;
+          #endif
           case INS_SELECT:
             keycard_select(G_io_apdu_buffer, &flags, &tx);
             break;
@@ -944,10 +1023,12 @@ __attribute__((section(".boot"))) int main(void) {
     TRY {
       io_seproxyhal_init();
 
+      #if defined(SECURE_CHANNEL)
       sc_close();
-
       cx_rng(G_sc_secret, SC_SECRET_LENGTH);
-      cx_ecfp_generate_pair(CX_CURVE_256K1, &G_secure_channel_public_key, &G_secure_channel_private_key, 0);
+      cx_ecfp_generate_pair(CX_CURVE_256K1, &G_sc_public_key, &G_sc_private_key, 0);
+      #endif
+
       keycard_generate_key_uid();
       keycard_init_nvm();
 
