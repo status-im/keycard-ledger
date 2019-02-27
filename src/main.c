@@ -675,6 +675,10 @@ void keycard_copy_path(uint8_t mode, const uint8_t* src, int src_len, uint32_t* 
       break;
   }
 
+  if (bip32_offset < 0) {
+    THROW(0x6B00);
+  }
+
   if (((bip32_offset + (src_len / 4)) > MAX_BIP32_PATH) || ((src_len % 4) != 0)) {
     THROW(0x6A80);
   }
@@ -763,10 +767,6 @@ void keycard_derive(unsigned char* apdu, volatile unsigned int *flags, volatile 
 
   if (apdu[OFFSET_LC] != HASH_LEN) {
     THROW(0x6A80);
-  }
-
-  if (G_bip32_path_len == 0) {
-    THROW(0x6985);
   }
 
   os_memmove(G_tmp_hash, &apdu[OFFSET_CDATA], HASH_LEN);
