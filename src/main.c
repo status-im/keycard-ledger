@@ -142,12 +142,12 @@ cx_aes_key_t G_sc_mac_key;
 #endif
 
 uint32_t G_bip32_path[MAX_BIP32_PATH];
-int G_bip32_path_len = 0;
+int G_bip32_path_len;
 
 uint32_t G_tmp_bip32_path[MAX_BIP32_PATH];
-int G_tmp_bip32_path_len = 0;
-uint8_t G_tmp_export_public_only = 0;
-uint8_t G_tmp_export_make_current = 0;
+int G_tmp_bip32_path_len;
+uint8_t G_tmp_export_public_only;
+uint8_t G_tmp_export_make_current;
 
 uint8_t G_tmp_hash[HASH_LEN];
 
@@ -175,6 +175,7 @@ unsigned short keycard_do_sign(unsigned char* apdu, volatile unsigned int *tx) {
   keycard_derive_key(G_bip32_path, G_bip32_path_len, &private_key, &public_key);
 
   apdu[(*tx)++] = TLV_SIGNATURE_TEMPLATE;
+  apdu[(*tx)++] = 0x81;
   apdu[(*tx)++] = 4 + EC_PUB_KEY_LEN;
   apdu[(*tx)++] = TLV_PUB_KEY;
   apdu[(*tx)++] = EC_PUB_KEY_LEN;
@@ -185,7 +186,7 @@ unsigned short keycard_do_sign(unsigned char* apdu, volatile unsigned int *tx) {
   int signature_len = cx_ecdsa_sign(&private_key, CX_RND_RFC6979 | CX_LAST, CX_SHA256, G_tmp_hash, HASH_LEN, &apdu[*tx], NULL);
   os_memset(&private_key, 0, sizeof(private_key));
 
-  apdu[1] += signature_len;
+  apdu[2] += signature_len;
   *tx += signature_len;
 
   return 0x9000;
@@ -843,6 +844,11 @@ void keycard_generate_key_uid() {
 }
 
 void keycard_init_nvm() {
+  G_bip32_path_len = 0;
+  G_tmp_bip32_path_len = 0;
+  G_tmp_export_public_only = 0;
+  G_tmp_export_make_current = 0;
+
   if (N_storage.initialized != 0x01) {
     internalStorage_t storage;
     #if defined(SECURE_CHANNEL)
