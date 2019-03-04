@@ -787,6 +787,15 @@ inline void validate_eip_1581_path(const uint32_t* path, int len) {
   }
 }
 
+void keycard_set_pinless_path(unsigned char* apdu, volatile unsigned int *flags, volatile unsigned int *tx) {
+  // A pinless path does not make sense on the Ledger, since the Ledger requires PIN entry only to turn on, not on every transaction.
+  if (((apdu[OFFSET_LC] / 4) > MAX_BIP32_PATH) || apdu[OFFSET_LC] % 4 != 0) {
+    THROW(0x6A80);
+  } else {
+    THROW(0x9000);
+  }
+}
+
 void keycard_export(unsigned char* apdu, volatile unsigned int *flags, volatile unsigned int *tx) {
   os_memmove(G_tmp_bip32_path, G_bip32_path, (G_bip32_path_len * 4));
   G_tmp_bip32_path_len = G_bip32_path_len;
@@ -929,7 +938,7 @@ static void runloop(void) {
             keycard_sign(G_io_apdu_buffer, &flags, &tx);
             break;
           case INS_SET_PINLESS_PATH:
-            THROW(0x6A81);
+          keycard_set_pinless_path(G_io_apdu_buffer, &flags, &tx);
             break;
           case INS_EXPORT_KEY:
             keycard_export(G_io_apdu_buffer, &flags, &tx);
