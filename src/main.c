@@ -117,6 +117,8 @@ typedef struct internalStorage_t {
   uint8_t pairings[SC_PAIRING_ARRAY_LEN];
 #endif
   uint8_t instance_uid[UID_LENGTH];
+  uint8_t confirm_export;
+  uint8_t confirm_sign;
   uint8_t initialized;
 } internalStorage_t;
 
@@ -295,6 +297,50 @@ static unsigned int ui_idle_blue_button(unsigned int button_mask, unsigned int b
 // ********************************************************************************
 
 const ux_menu_entry_t menu_main[];
+const ux_menu_entry_t menu_settings[];
+const ux_menu_entry_t menu_settings_export[];
+const ux_menu_entry_t menu_settings_sign[];
+
+void menu_settings_export_change(unsigned int enabled) {
+  uint8_t confirm_export = enabled;
+  nvm_write(&N_storage.confirm_export, (void*)&confirm_export, sizeof(uint8_t));
+  UX_MENU_DISPLAY(0, menu_settings, NULL);
+}
+
+void menu_settings_sign_change(unsigned int enabled) {
+  uint8_t confirm_sign = enabled;
+  nvm_write(&N_storage.confirm_sign, (void*)&confirm_sign, sizeof(uint8_t));
+  UX_MENU_DISPLAY(0, menu_settings, NULL);
+}
+
+void menu_settings_export_init(unsigned int ignored) {
+  UNUSED(ignored);
+  UX_MENU_DISPLAY(N_storage.confirm_export ? 1 : 0, menu_settings_export, NULL);
+}
+
+void menu_settings_sign_init(unsigned int ignored) {
+  UNUSED(ignored);
+  UX_MENU_DISPLAY(N_storage.confirm_sign ? 1 : 0, menu_settings_sign, NULL);
+}
+
+const ux_menu_entry_t menu_settings_export[] = {
+  {NULL, menu_settings_export_change, 0, NULL, "No", NULL, 0, 0},
+  {NULL, menu_settings_export_change, 1, NULL, "Yes", NULL, 0, 0},
+  UX_MENU_END
+};
+
+const ux_menu_entry_t menu_settings_sign[] = {
+  {NULL, menu_settings_sign_change, 0, NULL, "No", NULL, 0, 0},
+  {NULL, menu_settings_sign_change, 1, NULL, "Yes", NULL, 0, 0},
+  UX_MENU_END
+};
+
+const ux_menu_entry_t menu_settings[] = {
+  {NULL, menu_settings_export_init, 0, NULL, "Ask confirmation", "on export" , 0, 0},
+  {NULL, menu_settings_sign_init, 0, NULL, "Ask confirmation", "on sign" , 0, 0},
+  {menu_main, NULL, 2, &C_icon_back, "Back", NULL, 61, 40},
+  UX_MENU_END
+};
 
 const ux_menu_entry_t menu_about[] = {
   {NULL, NULL, 0, NULL, "Version", APPVERSION , 0, 0},
@@ -305,6 +351,7 @@ const ux_menu_entry_t menu_about[] = {
 const ux_menu_entry_t menu_main[] = {
   {NULL, NULL, 0, NULL, "Keycard", "by Status", 0, 0},
   {menu_about, NULL, 0, NULL, "About", NULL, 0, 0},
+  {menu_settings, NULL, 0, NULL, "Settings", NULL, 0, 0},
   #if defined(SECURE_CHANNEL)
   {NULL, sc_generate_pairing_password, 0, NULL, "Pairing password", NULL, 0, 0},
   #endif
@@ -772,13 +819,18 @@ void keycard_derive(unsigned char* apdu, volatile unsigned int *flags, volatile 
 
   os_memmove(G_tmp_hash, &apdu[OFFSET_CDATA], HASH_LEN);
 
-  #if defined(TARGET_BLUE)
-  // TODO: implement Ledger Blue UI
-  #elif defined(TARGET_NANOS)
-  UX_DISPLAY(ui_sign_nanos, NULL);
-  #endif
+  if (N_storage.confirm_sign) {
+    #if defined(TARGET_BLUE)
+    // TODO: implement Ledger Blue UI
+    #elif defined(TARGET_NANOS)
+    UX_DISPLAY(ui_sign_nanos, NULL);
+    #endif
 
-  *flags |= IO_ASYNCH_REPLY;
+    *flags |= IO_ASYNCH_REPLY;
+  } else {
+    unsigned short sw = keycard_do_sign(apdu, tx);
+    THROW(sw);
+  }
 }
 
 inline void validate_eip_1581_path(const uint32_t* path, int len) {
@@ -828,7 +880,7 @@ void keycard_export(unsigned char* apdu, volatile unsigned int *flags, volatile 
       break;
   }
 
-  if (G_tmp_export_public_only) {
+  if (G_tmp_export_public_only || !N_storage.confirm_export) {
     unsigned short sw = keycard_do_export(apdu, tx);
     THROW(sw);
   } else {
@@ -864,6 +916,8 @@ void keycard_init_nvm() {
     os_memset(storage.pairings, 0, SC_PAIRING_ARRAY_LEN);
     #endif
     cx_rng(storage.instance_uid, UID_LENGTH);
+    storage.confirm_export = 0x01;
+    storage.confirm_sign = 0x01;
     storage.initialized = 0x01;
     nvm_write(&N_storage, (void*)&storage, sizeof(internalStorage_t));
   }
