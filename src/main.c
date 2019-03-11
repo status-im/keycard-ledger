@@ -155,6 +155,10 @@ uint8_t G_tmp_hash[HASH_LEN];
 
 static void ui_idle(void);
 
+#if defined(SECURE_CHANNEL)
+void sc_generate_pairing_password(unsigned int ignored);
+#endif
+
 ux_state_t ux;
 
 void keycard_derive_key(uint32_t* path, int path_len, cx_ecfp_private_key_t* private_key, cx_ecfp_public_key_t* public_key) {
@@ -405,8 +409,6 @@ unsigned int ui_export_key_nanos_button(unsigned int button_mask, unsigned int b
 }
 
 #if defined(SECURE_CHANNEL)
-void sc_generate_pairing_password();
-
 const bagl_element_t ui_pair_nanos[] = {
   // {{type, userid, x, y, width, height, stroke, radius, fill, fgcolor, bgcolor, font_id, icon_id}, text, touch_area_brim, overfgcolor, overbgcolor, tap, out, over }
   {{BAGL_RECTANGLE, 0x00, 0, 0, 128, 32, 0, 0, BAGL_FILL, 0x000000, 0xFFFFFF, 0, 0}, NULL, 0, 0, 0, NULL, NULL, NULL},
@@ -485,11 +487,11 @@ uint8_t sc_preallocate_pairing_index() {
 }
 
 uint8_t sc_verify_mac(unsigned char* apdu) {
-
+  return 0;
 }
 
 uint8_t sc_decrypt_data(unsigned char* apdu) {
-
+  return 0;
 }
 
 void sc_postprocess_apdu(unsigned char* apdu) {
@@ -524,7 +526,7 @@ void sc_pbkdf2_sha256(const char *pass, size_t pass_len, uint8_t *asalt, size_t 
   os_memset(d2, 0, HASH_LEN);
 }
 
-void sc_generate_pairing_password() {
+void sc_generate_pairing_password(unsigned int ignored) {
   cx_rng((unsigned char *) G_sc_pairing_password, SC_PAIRING_PASS_LEN);
 
   for (int i = 0; i < SC_PAIRING_PASS_LEN; i++) {
