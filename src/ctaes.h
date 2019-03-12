@@ -38,4 +38,7 @@ void AES256_init(AES256_ctx* ctx, const unsigned char* key32);
 void AES256_encrypt(const AES256_ctx* ctx, size_t blocks, unsigned char* cipher16, const unsigned char* plain16);
 void AES256_decrypt(const AES256_ctx* ctx, size_t blocks, unsigned char* plain16, const unsigned char* cipher16);
 
+void AES256_encrypt_block(const AES256_ctx* ctx, unsigned char* cipher16, const unsigned char* plain16);
+void AES256_decrypt_block(const AES256_ctx* ctx, size_t blocks, unsigned char* plain16, const unsigned char* cipher16);
+
 #endif

@@ -490,12 +490,21 @@ uint8_t sc_verify_mac(unsigned char* apdu) {
   return 0;
 }
 
-uint8_t sc_decrypt_data(unsigned char* apdu) {
-  return 0;
+void sc_append_mac(unsigned char* apdu, volatile unsigned int *tx) {
+
 }
 
-void sc_postprocess_apdu(unsigned char* apdu) {
+void sc_decrypt_data(unsigned char* apdu) {
 
+}
+
+void sc_encrypt_data(unsigned char* apdu, volatile unsigned int *tx) {
+
+}
+
+void sc_postprocess_apdu(unsigned char* apdu, volatile unsigned int *tx) {
+  sc_encrypt_data(apdu);
+  sc_append_mac(apdu);
 }
 
 void sc_preprocess_apdu(unsigned char* apdu) {

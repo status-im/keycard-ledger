@@ -554,3 +554,11 @@ void AES256_decrypt(const AES256_ctx* ctx, size_t blocks, unsigned char* plain16
         plain16 += 16;
     }
 }
+
+void AES256_encrypt_block(const AES256_ctx* ctx, unsigned char* cipher16, const unsigned char* plain16) {
+  AES_encrypt(ctx->rk, 14, cipher16, plain16);
+}
+
+void AES256_decrypt_block(const AES256_ctx* ctx, size_t blocks, unsigned char* plain16, const unsigned char* cipher16) {
+  AES_decrypt(ctx->rk, 14, plain16, cipher16);
+}
