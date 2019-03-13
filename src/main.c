@@ -506,8 +506,8 @@ void sc_encrypt_data(unsigned char* apdu, volatile unsigned int *tx) {
 }
 
 void sc_postprocess_apdu(unsigned char* apdu, volatile unsigned int *tx) {
-  sc_encrypt_data(apdu);
-  sc_append_mac(apdu);
+  sc_encrypt_data(apdu, tx);
+  sc_append_mac(apdu, tx);
 }
 
 void sc_preprocess_apdu(unsigned char* apdu) {
@@ -567,13 +567,13 @@ void sc_pair_step1(unsigned char* apdu_data, unsigned char* apdu_out, volatile u
   cx_sha256_t sha256;
   cx_sha256_init(&sha256);
   cx_hash((cx_hash_t *) &sha256, 0, G_sc_secret, SC_SECRET_LENGTH, NULL);
-  cx_hash((cx_hash_t *) &sha256, CX_LAST, &apdu_data, SC_SECRET_LENGTH, apdu_out);
+  cx_hash((cx_hash_t *) &sha256, CX_LAST, apdu_data, SC_SECRET_LENGTH, apdu_out);
   cx_rng(&apdu_out[HASH_LEN], HASH_LEN);
   *tx = (HASH_LEN * 2);
 
   cx_sha256_init(&sha256);
   cx_hash((cx_hash_t *) &sha256, 0, G_sc_secret, SC_SECRET_LENGTH, NULL);
-  cx_hash((cx_hash_t *) &sha256, CX_LAST, &apdu_out, SC_SECRET_LENGTH, G_sc_session_data);
+  cx_hash((cx_hash_t *) &sha256, CX_LAST, apdu_out, SC_SECRET_LENGTH, G_sc_session_data);
 }
 
 void sc_pair_step2(unsigned char* apdu_data, unsigned char* apdu_out, volatile unsigned int *flags, volatile unsigned int *tx) {
@@ -652,7 +652,7 @@ void sc_open_secure_channel(uint8_t p1, uint8_t p2, uint8_t lc, unsigned char* a
   cx_sha512_t sha512;
   cx_sha512_init(&sha512);
   cx_hash((cx_hash_t *) &sha512, 0, secret, SC_SECRET_LENGTH, NULL);
-  cx_hash((cx_hash_t *) &sha512, 0, &N_storage.pairings[(apdu[OFFSET_P1] * SC_PAIRING_KEY_LEN) + 1], SC_SECRET_LENGTH, NULL);
+  cx_hash((cx_hash_t *) &sha512, 0, &N_storage.pairings[(p1 * SC_PAIRING_KEY_LEN) + 1], SC_SECRET_LENGTH, NULL);
   cx_hash((cx_hash_t *) &sha512, CX_LAST, apdu_out, SC_SECRET_LENGTH, G_sc_keys);
 
   *tx = (HASH_LEN + SC_IV_LEN);
