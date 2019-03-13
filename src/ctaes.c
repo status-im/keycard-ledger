@@ -1,3 +1,4 @@
+#ifdef SECURE_CHANNEL
  /*********************************************************************
  * Copyright (c) 2016 Pieter Wuille                                   *
  * Distributed under the MIT software license, see the accompanying   *
@@ -562,3 +563,4 @@ void AES256_encrypt_block(const AES256_ctx* ctx, unsigned char* cipher16, const 
 void AES256_decrypt_block(const AES256_ctx* ctx, size_t blocks, unsigned char* plain16, const unsigned char* cipher16) {
   AES_decrypt(ctx->rk, 14, plain16, cipher16);
 }
+#endif

@@ -139,8 +139,9 @@ char G_sc_pairing_password[SC_PAIRING_PASS_LEN + 1];
 int8_t G_sc_preallocated_offset;
 uint8_t G_sc_open;
 uint8_t G_sc_session_data[SC_SECRET_LENGTH];
-cx_aes_key_t G_sc_enc_key;
-cx_aes_key_t G_sc_mac_key;
+uint8_t G_sc_keys[SC_SECRET_LENGTH * 2];
+uint8_t* G_sc_enc_key = G_sc_keys;
+uint8_t* G_sc_mac_key = &G_sc_keys[SC_SECRET_LENGTH];
 #endif
 
 uint32_t G_bip32_path[MAX_BIP32_PATH];
@@ -174,53 +175,53 @@ void keycard_derive_key(uint32_t* path, int path_len, cx_ecfp_private_key_t* pri
   os_memset(private_key_data, 0, sizeof(private_key_data));
 }
 
-unsigned short keycard_do_sign(unsigned char* apdu, volatile unsigned int *tx) {
+unsigned short keycard_do_sign(unsigned char* out, volatile unsigned int *tx) {
   cx_ecfp_private_key_t private_key;
   cx_ecfp_public_key_t public_key;
 
   keycard_derive_key(G_bip32_path, G_bip32_path_len, &private_key, &public_key);
 
-  apdu[(*tx)++] = TLV_SIGNATURE_TEMPLATE;
-  apdu[(*tx)++] = 0x81;
-  apdu[(*tx)++] = 4 + EC_PUB_KEY_LEN;
-  apdu[(*tx)++] = TLV_PUB_KEY;
-  apdu[(*tx)++] = EC_PUB_KEY_LEN;
+  out[(*tx)++] = TLV_SIGNATURE_TEMPLATE;
+  out[(*tx)++] = 0x81;
+  out[(*tx)++] = 4 + EC_PUB_KEY_LEN;
+  out[(*tx)++] = TLV_PUB_KEY;
+  out[(*tx)++] = EC_PUB_KEY_LEN;
 
-  os_memmove(&apdu[*tx], public_key.W, EC_PUB_KEY_LEN);
+  os_memmove(&out[*tx], public_key.W, EC_PUB_KEY_LEN);
   *tx += EC_PUB_KEY_LEN;
 
-  int signature_len = cx_ecdsa_sign(&private_key, CX_RND_RFC6979 | CX_LAST, CX_SHA256, G_tmp_hash, HASH_LEN, &apdu[*tx], NULL);
+  int signature_len = cx_ecdsa_sign(&private_key, CX_RND_RFC6979 | CX_LAST, CX_SHA256, G_tmp_hash, HASH_LEN, &out[*tx], NULL);
   os_memset(&private_key, 0, sizeof(private_key));
 
-  apdu[2] += signature_len;
+  out[2] += signature_len;
   *tx += signature_len;
 
   return 0x9000;
 }
 
-unsigned short keycard_do_export(unsigned char* apdu, volatile unsigned int *tx) {
+unsigned short keycard_do_export(unsigned char* out, volatile unsigned int *tx) {
   cx_ecfp_private_key_t private_key;
   cx_ecfp_public_key_t public_key;
 
   keycard_derive_key(G_tmp_bip32_path, G_tmp_bip32_path_len, &private_key, &public_key);
 
-  apdu[(*tx)++] = TLV_KEY_TEMPLATE;
-  apdu[(*tx)++] = 2 + EC_PUB_KEY_LEN;
+  out[(*tx)++] = TLV_KEY_TEMPLATE;
+  out[(*tx)++] = 2 + EC_PUB_KEY_LEN;
 
   if (!G_tmp_export_public_only) {
-    apdu[1] += 2 + EC_COMPONENT_LEN;
+    out[1] += 2 + EC_COMPONENT_LEN;
 
-    apdu[(*tx)++] = TLV_PRIV_KEY;
-    apdu[(*tx)++] = EC_COMPONENT_LEN;
-    os_memmove(&apdu[*tx], private_key.d, EC_COMPONENT_LEN);
+    out[(*tx)++] = TLV_PRIV_KEY;
+    out[(*tx)++] = EC_COMPONENT_LEN;
+    os_memmove(&out[*tx], private_key.d, EC_COMPONENT_LEN);
     *tx += EC_COMPONENT_LEN;
   }
 
   os_memset(&private_key, 0, sizeof(private_key));
 
-  apdu[(*tx)++] = TLV_PUB_KEY;
-  apdu[(*tx)++] = EC_PUB_KEY_LEN;
-  os_memmove(&apdu[*tx], public_key.W, EC_PUB_KEY_LEN);
+  out[(*tx)++] = TLV_PUB_KEY;
+  out[(*tx)++] = EC_PUB_KEY_LEN;
+  os_memmove(&out[*tx], public_key.W, EC_PUB_KEY_LEN);
   *tx += EC_PUB_KEY_LEN;
 
   if (G_tmp_export_make_current) {
@@ -234,6 +235,8 @@ unsigned short keycard_do_export(unsigned char* apdu, volatile unsigned int *tx)
 static const bagl_element_t* io_seproxyhal_touch_ok(const bagl_element_t *e) {
   unsigned int tx = 0;
   unsigned short sw;
+
+  //TODO: add secure channel
 
   switch (e->component.userid) {
     case EVT_SIGN:
@@ -556,7 +559,7 @@ void sc_generate_pairing_password(unsigned int ignored) {
   #endif
 }
 
-void sc_pair_step1(unsigned char* apdu, volatile unsigned int *flags, volatile unsigned int *tx) {
+void sc_pair_step1(unsigned char* apdu_data, unsigned char* apdu_out, volatile unsigned int *flags, volatile unsigned int *tx) {
   if (!sc_preallocate_pairing_index()) {
     THROW(0x6A84);
   }
@@ -564,54 +567,54 @@ void sc_pair_step1(unsigned char* apdu, volatile unsigned int *flags, volatile u
   cx_sha256_t sha256;
   cx_sha256_init(&sha256);
   cx_hash((cx_hash_t *) &sha256, 0, G_sc_secret, SC_SECRET_LENGTH, NULL);
-  cx_hash((cx_hash_t *) &sha256, CX_LAST, &apdu[OFFSET_CDATA], SC_SECRET_LENGTH, apdu);
-  cx_rng(&apdu[HASH_LEN], HASH_LEN);
+  cx_hash((cx_hash_t *) &sha256, CX_LAST, &apdu_data, SC_SECRET_LENGTH, apdu_out);
+  cx_rng(&apdu_out[HASH_LEN], HASH_LEN);
   *tx = (HASH_LEN * 2);
 
   cx_sha256_init(&sha256);
   cx_hash((cx_hash_t *) &sha256, 0, G_sc_secret, SC_SECRET_LENGTH, NULL);
-  cx_hash((cx_hash_t *) &sha256, CX_LAST, &apdu[HASH_LEN], SC_SECRET_LENGTH, G_sc_session_data);
+  cx_hash((cx_hash_t *) &sha256, CX_LAST, &apdu_out, SC_SECRET_LENGTH, G_sc_session_data);
 }
 
-void sc_pair_step2(unsigned char* apdu, volatile unsigned int *flags, volatile unsigned int *tx) {
+void sc_pair_step2(unsigned char* apdu_data, unsigned char* apdu_out, volatile unsigned int *flags, volatile unsigned int *tx) {
   if (G_sc_preallocated_offset == -1) {
     THROW(0x6A86);
   }
 
-  if (os_memcmp(&apdu[OFFSET_CDATA], C_instance_aid, INSTANCE_AID_LEN) != 0) {
+  if (os_memcmp(apdu_data, C_instance_aid, INSTANCE_AID_LEN) != 0) {
     THROW(0x6982);
   }
 
-  apdu[0] = (G_sc_preallocated_offset / SC_PAIRING_KEY_LEN);
+  apdu_out[0] = (G_sc_preallocated_offset / SC_PAIRING_KEY_LEN);
   uint8_t pairing[SC_PAIRING_KEY_LEN];
   pairing[0] = 1;
 
-  cx_rng(&apdu[1], HASH_LEN);
+  cx_rng(&apdu_out[1], HASH_LEN);
 
   cx_sha256_t sha256;
   cx_sha256_init(&sha256);
   cx_hash((cx_hash_t *) &sha256, 0, G_sc_secret, SC_SECRET_LENGTH, NULL);
-  cx_hash((cx_hash_t *) &sha256, CX_LAST, &apdu[1], SC_SECRET_LENGTH, &pairing[1]);
+  cx_hash((cx_hash_t *) &sha256, CX_LAST, &apdu_out[1], SC_SECRET_LENGTH, &pairing[1]);
 
   nvm_write(&N_storage.pairings[G_sc_preallocated_offset], pairing, SC_PAIRING_KEY_LEN);
   G_sc_preallocated_offset = 0;
 }
 
-void sc_pair(unsigned char* apdu, volatile unsigned int *flags, volatile unsigned int *tx) {
+void sc_pair(uint8_t p1, uint8_t p2, uint8_t lc, unsigned char* apdu_data, unsigned char* apdu_out, volatile unsigned int *flags, volatile unsigned int *tx) {
   if (G_sc_open != SC_STATE_CLOSED) {
     THROW(0x6985);
   }
 
-  if (apdu[OFFSET_LC] != SC_SECRET_LENGTH) {
+  if (lc != SC_SECRET_LENGTH) {
     THROW(0x6A80);
   }
 
-  switch(apdu[OFFSET_P1]) {
+  switch(p1) {
     case PAIR_P1_FIRST_STEP:
-      sc_pair_step1(apdu, flags, tx);
+      sc_pair_step1(apdu_data, apdu_out, flags, tx);
       break;
     case PAIR_P1_LAST_STEP:
-      sc_pair_step2(apdu, flags, tx);
+      sc_pair_step2(apdu_data, apdu_out, flags, tx);
       break;
     default:
       THROW(0x6A86);
@@ -626,15 +629,15 @@ void sc_close() {
   G_sc_preallocated_offset = -1;
 }
 
-void sc_unpair(unsigned char* apdu, volatile unsigned int *flags, volatile unsigned int *tx) {
+void sc_unpair(uint8_t p1, uint8_t p2, uint8_t lc, unsigned char* apdu_data, unsigned char* apdu_out, volatile unsigned int *flags, volatile unsigned int *tx) {
 }
 
-void sc_open_secure_channel(unsigned char* apdu, volatile unsigned int *flags, volatile unsigned int *tx) {
-  if (apdu[OFFSET_LC] != EC_PUB_KEY_LEN) {
+void sc_open_secure_channel(uint8_t p1, uint8_t p2, uint8_t lc, unsigned char* apdu_data, unsigned char* apdu_out, volatile unsigned int *flags, volatile unsigned int *tx) {
+  if (lc != EC_PUB_KEY_LEN) {
     THROW(0x6A80);
   }
 
-  if ((apdu[OFFSET_P1] >= SC_MAX_PAIRINGS) || (N_storage.pairings[apdu[OFFSET_P1] * SC_PAIRING_KEY_LEN] != 1)) {
+  if ((p1 >= SC_MAX_PAIRINGS) || (N_storage.pairings[p1 * SC_PAIRING_KEY_LEN] != 1)) {
     THROW(0x6A86);
   }
 
@@ -642,20 +645,15 @@ void sc_open_secure_channel(unsigned char* apdu, volatile unsigned int *flags, v
 
   uint8_t secret[EC_COMPONENT_LEN];
 
-  cx_ecdh(&G_sc_private_key, CX_ECDH_X, &apdu[OFFSET_CDATA], secret);
+  cx_ecdh(&G_sc_private_key, CX_ECDH_X, apdu_data, secret);
 
-  cx_rng(apdu, (HASH_LEN + SC_IV_LEN));
-
-  uint8_t tmp[SC_SECRET_LENGTH * 2];
+  cx_rng(apdu_out, (HASH_LEN + SC_IV_LEN));
 
   cx_sha512_t sha512;
   cx_sha512_init(&sha512);
   cx_hash((cx_hash_t *) &sha512, 0, secret, SC_SECRET_LENGTH, NULL);
   cx_hash((cx_hash_t *) &sha512, 0, &N_storage.pairings[(apdu[OFFSET_P1] * SC_PAIRING_KEY_LEN) + 1], SC_SECRET_LENGTH, NULL);
-  cx_hash((cx_hash_t *) &sha512, CX_LAST, apdu, SC_SECRET_LENGTH, tmp);
-
-  cx_aes_init_key(tmp, SC_SECRET_LENGTH, &G_sc_enc_key);
-  cx_aes_init_key(&tmp[SC_SECRET_LENGTH], SC_SECRET_LENGTH, &G_sc_mac_key);
+  cx_hash((cx_hash_t *) &sha512, CX_LAST, apdu_out, SC_SECRET_LENGTH, G_sc_keys);
 
   *tx = (HASH_LEN + SC_IV_LEN);
   G_sc_open = SC_STATE_OPENING;
@@ -663,50 +661,50 @@ void sc_open_secure_channel(unsigned char* apdu, volatile unsigned int *flags, v
   THROW(0x9000);
 }
 
-void sc_mutually_authenticate(unsigned char* apdu, volatile unsigned int *flags, volatile unsigned int *tx) {
+void sc_mutually_authenticate(uint8_t p1, uint8_t p2, uint8_t lc, unsigned char* apdu_data, unsigned char* apdu_out, volatile unsigned int *flags, volatile unsigned int *tx) {
   if (G_sc_open != SC_STATE_OPENING) {
     THROW(0x6985);
   }
 
-  cx_rng(apdu, SC_SECRET_LENGTH);
+  cx_rng(apdu_out, SC_SECRET_LENGTH);
   *tx = SC_SECRET_LENGTH;
 
   G_sc_open = SC_STATE_OPEN;
 }
 #endif
 
-void keycard_get_status_app(unsigned char* apdu, volatile unsigned int *tx) {
-  apdu[(*tx)++] = TLV_APPLICATION_STATUS_TEMPLATE;
-  apdu[(*tx)++] = 9;
-  apdu[(*tx)++] = TLV_INT;
-  apdu[(*tx)++] = 1;
-  apdu[(*tx)++] = 0xff;
-  apdu[(*tx)++] = TLV_INT;
-  apdu[(*tx)++] = 1;
-  apdu[(*tx)++] = 0xff;
-  apdu[(*tx)++] = TLV_BOOL;
-  apdu[(*tx)++] = 1;
-  apdu[(*tx)++] = 0xff;
+void keycard_get_status_app(unsigned char* out, volatile unsigned int *tx) {
+  out[(*tx)++] = TLV_APPLICATION_STATUS_TEMPLATE;
+  out[(*tx)++] = 9;
+  out[(*tx)++] = TLV_INT;
+  out[(*tx)++] = 1;
+  out[(*tx)++] = 0xff;
+  out[(*tx)++] = TLV_INT;
+  out[(*tx)++] = 1;
+  out[(*tx)++] = 0xff;
+  out[(*tx)++] = TLV_BOOL;
+  out[(*tx)++] = 1;
+  out[(*tx)++] = 0xff;
 }
 
-void keycard_get_status_keypath(unsigned char* apdu, volatile unsigned int *tx) {
+void keycard_get_status_keypath(unsigned char* out, volatile unsigned int *tx) {
   for (int i = 0; i < G_bip32_path_len; i++) {
-    apdu[(*tx)++] = ((G_bip32_path[i] >> 24) & 0xff);
-    apdu[(*tx)++] = ((G_bip32_path[i] >> 16) & 0xff);
-    apdu[(*tx)++] = ((G_bip32_path[i] >> 8) & 0xff);
-    apdu[(*tx)++] = (G_bip32_path[i] & 0xff);
+    out[(*tx)++] = ((G_bip32_path[i] >> 24) & 0xff);
+    out[(*tx)++] = ((G_bip32_path[i] >> 16) & 0xff);
+    out[(*tx)++] = ((G_bip32_path[i] >> 8) & 0xff);
+    out[(*tx)++] = (G_bip32_path[i] & 0xff);
   }
 }
 
-void keycard_get_status(unsigned char* apdu, volatile unsigned int *flags, volatile unsigned int *tx) {
+void keycard_get_status(uint8_t p1, uint8_t p2, uint8_t lc, unsigned char* apdu_data, unsigned char* apdu_out, volatile unsigned int *flags, volatile unsigned int *tx) {
   UNUSED(flags);
 
-  switch (apdu[OFFSET_P1]) {
+  switch (p1) {
     case GET_STATUS_P1_APP_STATUS:
-      keycard_get_status_app(apdu, tx);
+      keycard_get_status_app(apdu_out, tx);
       break;
     case GET_STATUS_P1_APP_KEYPATH:
-      keycard_get_status_keypath(apdu, tx);
+      keycard_get_status_keypath(apdu_out, tx);
       break;
     default:
       THROW(0x6A86);
@@ -749,14 +747,14 @@ void keycard_copy_path(uint8_t mode, const uint8_t* src, int src_len, uint32_t* 
   *dst_len = bip32_offset;
 }
 
-void keycard_select(unsigned char* apdu, volatile unsigned int *flags, volatile unsigned int *tx) {
+void keycard_select(uint8_t p1, uint8_t p2, uint8_t lc, unsigned char* apdu_data, unsigned char* apdu_out, volatile unsigned int *flags, volatile unsigned int *tx) {
   UNUSED(flags);
 
-  if (apdu[OFFSET_P1] != 0x04 || apdu[OFFSET_P2] != 0x00) {
+  if (p1 != 0x04 || p2 != 0x00) {
     THROW(0x6A81);
   }
 
-  if (apdu[OFFSET_LC] != INSTANCE_AID_LEN || os_memcmp(&apdu[OFFSET_CDATA], C_instance_aid, INSTANCE_AID_LEN) != 0) {
+  if (lc != INSTANCE_AID_LEN || os_memcmp(apdu_data, C_instance_aid, INSTANCE_AID_LEN) != 0) {
     THROW(0x6A84);
   }
 
@@ -764,71 +762,71 @@ void keycard_select(unsigned char* apdu, volatile unsigned int *flags, volatile 
   sc_close();
   #endif
 
-  apdu[(*tx)++] = TLV_APPLICATION_INFO_TEMPLATE;
+  apdu_out[(*tx)++] = TLV_APPLICATION_INFO_TEMPLATE;
   #if defined(SECURE_CHANNEL)
-  apdu[(*tx)++] = 0x81;
-  apdu[(*tx)++] = UID_LENGTH + HASH_LEN + EC_PUB_KEY_LEN + 16;
+  apdu_out[(*tx)++] = 0x81;
+  apdu_out[(*tx)++] = UID_LENGTH + HASH_LEN + EC_PUB_KEY_LEN + 16;
   #else
-  apdu[(*tx)++] = UID_LENGTH + HASH_LEN + 16;
+  apdu_out[(*tx)++] = UID_LENGTH + HASH_LEN + 16;
   #endif
 
-  apdu[(*tx)++] = TLV_UID;
-  apdu[(*tx)++] = UID_LENGTH;
-  os_memmove(&apdu[*tx], N_storage.instance_uid, UID_LENGTH);
+  apdu_out[(*tx)++] = TLV_UID;
+  apdu_out[(*tx)++] = UID_LENGTH;
+  os_memmove(&apdu_out[*tx], N_storage.instance_uid, UID_LENGTH);
   *tx += UID_LENGTH;
 
-  apdu[(*tx)++] = TLV_PUB_KEY;
+  apdu_out[(*tx)++] = TLV_PUB_KEY;
 
   #if defined(SECURE_CHANNEL)
-  apdu[(*tx)++] = EC_PUB_KEY_LEN;
-  os_memmove(&apdu[*tx], G_sc_public_key.W, EC_PUB_KEY_LEN);
+  apdu_out[(*tx)++] = EC_PUB_KEY_LEN;
+  os_memmove(&apdu_out[*tx], G_sc_public_key.W, EC_PUB_KEY_LEN);
   *tx += EC_PUB_KEY_LEN;
   #else
-  apdu[(*tx)++] = 0x00;
+  apdu_out[(*tx)++] = 0x00;
   #endif
 
-  apdu[(*tx)++] = TLV_INT;
-  apdu[(*tx)++] = 2;
-  apdu[(*tx)++] = APPMAJOR;
-  apdu[(*tx)++] = APPMINOR;
+  apdu_out[(*tx)++] = TLV_INT;
+  apdu_out[(*tx)++] = 2;
+  apdu_out[(*tx)++] = APPMAJOR;
+  apdu_out[(*tx)++] = APPMINOR;
 
-  apdu[(*tx)++] = TLV_INT;
-  apdu[(*tx)++] = 1;
+  apdu_out[(*tx)++] = TLV_INT;
+  apdu_out[(*tx)++] = 1;
   #if defined(SECURE_CHANNEL)
-  apdu[(*tx)++] = sc_available_pairings();
+  apdu_out[(*tx)++] = sc_available_pairings();
   #else
-  apdu[(*tx)++] = 0xff;
+  apdu_out[(*tx)++] = 0xff;
   #endif
 
-  apdu[(*tx)++] = TLV_KEY_UID;
-  apdu[(*tx)++] = HASH_LEN;
-  os_memmove(&apdu[*tx], G_key_uid, HASH_LEN);
+  apdu_out[(*tx)++] = TLV_KEY_UID;
+  apdu_out[(*tx)++] = HASH_LEN;
+  os_memmove(&apdu_out[*tx], G_key_uid, HASH_LEN);
   *tx += HASH_LEN;
 
-  apdu[(*tx)++] = TLV_CAPABILITIES;
-  apdu[(*tx)++] = 1;
-  apdu[(*tx)++] = CAPABILITIES;
+  apdu_out[(*tx)++] = TLV_CAPABILITIES;
+  apdu_out[(*tx)++] = 1;
+  apdu_out[(*tx)++] = CAPABILITIES;
 
   THROW(0x9000);
 }
 
-void keycard_derive(unsigned char* apdu, volatile unsigned int *flags, volatile unsigned int *tx) {
+void keycard_derive(uint8_t p1, uint8_t p2, uint8_t lc, unsigned char* apdu_data, unsigned char* apdu_out, volatile unsigned int *flags, volatile unsigned int *tx) {
   UNUSED(flags);
   UNUSED(tx);
 
-  keycard_copy_path(apdu[OFFSET_P1], &apdu[OFFSET_CDATA], apdu[OFFSET_LC], G_bip32_path, &G_bip32_path_len);
+  keycard_copy_path(p1, apdu_data, lc, G_bip32_path, &G_bip32_path_len);
 
   THROW(0x9000);
 }
 
- void keycard_sign(unsigned char* apdu, volatile unsigned int *flags, volatile unsigned int *tx) {
+ void keycard_sign(uint8_t p1, uint8_t p2, uint8_t lc, unsigned char* apdu_data, unsigned char* apdu_out, volatile unsigned int *flags, volatile unsigned int *tx) {
   UNUSED(tx);
 
-  if (apdu[OFFSET_LC] != HASH_LEN) {
+  if (lc != HASH_LEN) {
     THROW(0x6A80);
   }
 
-  os_memmove(G_tmp_hash, &apdu[OFFSET_CDATA], HASH_LEN);
+  os_memmove(G_tmp_hash, apdu_data, HASH_LEN);
 
   if (N_storage.confirm_sign) {
     #if defined(TARGET_BLUE)
@@ -839,7 +837,7 @@ void keycard_derive(unsigned char* apdu, volatile unsigned int *flags, volatile 
 
     *flags |= IO_ASYNCH_REPLY;
   } else {
-    unsigned short sw = keycard_do_sign(apdu, tx);
+    unsigned short sw = keycard_do_sign(apdu_out, tx);
     THROW(sw);
   }
 }
@@ -850,35 +848,35 @@ inline void validate_eip_1581_path(const uint32_t* path, int len) {
   }
 }
 
-void keycard_set_pinless_path(unsigned char* apdu, volatile unsigned int *flags, volatile unsigned int *tx) {
+void keycard_set_pinless_path(uint8_t p1, uint8_t p2, uint8_t lc, unsigned char* apdu_data, unsigned char* apdu_out, volatile unsigned int *flags, volatile unsigned int *tx) {
   // A pinless path does not make sense on the Ledger, since the Ledger requires PIN entry only to turn on, not on every transaction.
-  if (((apdu[OFFSET_LC] / 4) > MAX_BIP32_PATH) || apdu[OFFSET_LC] % 4 != 0) {
+  if (((lc / 4) > MAX_BIP32_PATH) || lc % 4 != 0) {
     THROW(0x6A80);
   } else {
     THROW(0x9000);
   }
 }
 
-void keycard_export(unsigned char* apdu, volatile unsigned int *flags, volatile unsigned int *tx) {
+void keycard_export(uint8_t p1, uint8_t p2, uint8_t lc, unsigned char* apdu_data, unsigned char* apdu_out, volatile unsigned int *flags, volatile unsigned int *tx) {
   os_memmove(G_tmp_bip32_path, G_bip32_path, (G_bip32_path_len * 4));
   G_tmp_bip32_path_len = G_bip32_path_len;
 
   G_tmp_export_make_current = 0;
 
-  switch (apdu[OFFSET_P1] & ~DERIVE_KEY_P1_MASK) {
+  switch (p1 & ~DERIVE_KEY_P1_MASK) {
     case EXPORT_KEY_P1_CURRENT:
       break;
     case EXPORT_KEY_P1_DERIVE_AND_MAKE_CURRENT:
       G_tmp_export_make_current = 1;
     case EXPORT_KEY_P1_DERIVE:
-      keycard_copy_path((apdu[OFFSET_P1] & DERIVE_KEY_P1_MASK), &apdu[OFFSET_CDATA], apdu[OFFSET_LC], G_tmp_bip32_path, &G_tmp_bip32_path_len);
+      keycard_copy_path((p1 & DERIVE_KEY_P1_MASK), apdu_data, lc, G_tmp_bip32_path, &G_tmp_bip32_path_len);
       break;
     default:
       THROW(0x6A86);
       break;
   }
 
-  switch (apdu[OFFSET_P2]) {
+  switch (p2) {
     case EXPORT_KEY_P2_FULL:
       validate_eip_1581_path(G_tmp_bip32_path, G_tmp_bip32_path_len);
       G_tmp_export_public_only = 0;
@@ -892,7 +890,7 @@ void keycard_export(unsigned char* apdu, volatile unsigned int *flags, volatile 
   }
 
   if (G_tmp_export_public_only || !N_storage.confirm_export) {
-    unsigned short sw = keycard_do_export(apdu, tx);
+    unsigned short sw = keycard_do_export(apdu_out, tx);
     THROW(sw);
   } else {
     #if defined(TARGET_BLUE)
@@ -962,25 +960,30 @@ static void runloop(void) {
           THROW(0x6982);
         }
 
+        uint8_t* apdu_data = &G_io_apdu_buffer[OFFSET_CDATA];
+        uint8_t* apdu_out = G_io_apdu_buffer;
+
         #if defined(SECURE_CHANNEL)
         if (G_sc_open != SC_STATE_CLOSED) {
           sc_preprocess_apdu(G_io_apdu_buffer);
+          apdu_data += SC_IV_LEN;
+          apdu_out += SC_IV_LEN;
         }
         #endif
 
         switch (G_io_apdu_buffer[OFFSET_INS]) {
           #if defined(SECURE_CHANNEL)
           case INS_PAIR:
-            sc_pair(G_io_apdu_buffer, &flags, &tx);
+            sc_pair(G_io_apdu_buffer[OFFSET_P1], G_io_apdu_buffer[OFFSET_P2], G_io_apdu_buffer[OFFSET_LC], apdu_data, apdu_out, &flags, &tx);
             break;
           case INS_UNPAIR:
-            sc_unpair(G_io_apdu_buffer, &flags, &tx);
+            sc_unpair(G_io_apdu_buffer[OFFSET_P1], G_io_apdu_buffer[OFFSET_P2], G_io_apdu_buffer[OFFSET_LC], apdu_data, apdu_out, &flags, &tx);
             break;
           case INS_OPEN_SECURE_CHANNEL:
-            sc_open_secure_channel(G_io_apdu_buffer, &flags, &tx);
+            sc_open_secure_channel(G_io_apdu_buffer[OFFSET_P1], G_io_apdu_buffer[OFFSET_P2], G_io_apdu_buffer[OFFSET_LC], apdu_data, apdu_out, &flags, &tx);
             break;
           case INS_MUTUALLY_AUTHENTICATE:
-            sc_mutually_authenticate(G_io_apdu_buffer, &flags, &tx);
+            sc_mutually_authenticate(G_io_apdu_buffer[OFFSET_P1], G_io_apdu_buffer[OFFSET_P2], G_io_apdu_buffer[OFFSET_LC], apdu_data, apdu_out, &flags, &tx);
             break;
           #else
           case INS_PAIR:
@@ -991,22 +994,22 @@ static void runloop(void) {
             break;
           #endif
           case INS_SELECT:
-            keycard_select(G_io_apdu_buffer, &flags, &tx);
+            keycard_select(G_io_apdu_buffer[OFFSET_P1], G_io_apdu_buffer[OFFSET_P2], G_io_apdu_buffer[OFFSET_LC], apdu_data, apdu_out, &flags, &tx);
             break;
           case INS_GET_STATUS:
-            keycard_get_status(G_io_apdu_buffer, &flags, &tx);
+            keycard_get_status(G_io_apdu_buffer[OFFSET_P1], G_io_apdu_buffer[OFFSET_P2], G_io_apdu_buffer[OFFSET_LC], apdu_data, apdu_out, &flags, &tx);
             break;
           case INS_DERIVE_KEY:
-            keycard_derive(G_io_apdu_buffer, &flags, &tx);
+            keycard_derive(G_io_apdu_buffer[OFFSET_P1], G_io_apdu_buffer[OFFSET_P2], G_io_apdu_buffer[OFFSET_LC], apdu_data, apdu_out, &flags, &tx);
             break;
           case INS_SIGN:
-            keycard_sign(G_io_apdu_buffer, &flags, &tx);
+            keycard_sign(G_io_apdu_buffer[OFFSET_P1], G_io_apdu_buffer[OFFSET_P2], G_io_apdu_buffer[OFFSET_LC], apdu_data, apdu_out, &flags, &tx);
             break;
           case INS_SET_PINLESS_PATH:
-          keycard_set_pinless_path(G_io_apdu_buffer, &flags, &tx);
+          keycard_set_pinless_path(G_io_apdu_buffer[OFFSET_P1], G_io_apdu_buffer[OFFSET_P2], G_io_apdu_buffer[OFFSET_LC], apdu_data, apdu_out, &flags, &tx);
             break;
           case INS_EXPORT_KEY:
-            keycard_export(G_io_apdu_buffer, &flags, &tx);
+            keycard_export(G_io_apdu_buffer[OFFSET_P1], G_io_apdu_buffer[OFFSET_P2], G_io_apdu_buffer[OFFSET_LC], apdu_data, apdu_out, &flags, &tx);
             break;
           case INS_INIT:
           case INS_VERIFY_PIN:
