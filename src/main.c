@@ -21,13 +21,8 @@
 #include "glyphs.h"
 
 #include "os_io_seproxyhal.h"
-
-#define OFFSET_CLA 0
-#define OFFSET_INS 1
-#define OFFSET_P1 2
-#define OFFSET_P2 3
-#define OFFSET_LC 4
-#define OFFSET_CDATA 5
+#include "secure_channel.h"
+#include "defines.h"
 
 #define INS_SELECT 0xA4
 #define INS_GET_STATUS 0xF2
@@ -65,9 +60,6 @@
 #define GET_STATUS_P1_APP_STATUS 0x00
 #define GET_STATUS_P1_APP_KEYPATH 0x01
 
-#define PAIR_P1_FIRST_STEP 0x00
-#define PAIR_P1_LAST_STEP 0x01
-
 #define TLV_SIGNATURE_TEMPLATE 0xA0
 #define TLV_KEY_TEMPLATE 0xA1
 #define TLV_PUB_KEY 0x80
@@ -90,32 +82,10 @@
 #define CAPABILITIES 0x00
 #endif
 
-#define UID_LENGTH 16
-#define MAX_BIP32_PATH 10
-#define HASH_LEN 32
-#define EC_COMPONENT_LEN 32
-#define EC_PUB_KEY_LEN (1 + (EC_COMPONENT_LEN * 2))
-
-#define SC_IV_LEN 16
-#define SC_SECRET_LENGTH 32
-#define SC_MAX_PAIRINGS 5
-#define SC_PAIRING_KEY_LEN (SC_SECRET_LENGTH + 1)
-#define SC_PAIRING_ARRAY_LEN (SC_PAIRING_KEY_LEN * SC_MAX_PAIRINGS)
-#define SC_PAIRING_PASS_LEN 6
-
-#define SC_STATE_CLOSED 0
-#define SC_STATE_OPENING 1
-#define SC_STATE_OPEN 2
-
 #define EVT_SIGN 0
 #define EVT_EXPORT 1
 
-#define INSTANCE_AID_LEN 9
-
 typedef struct internalStorage_t {
-#if defined(SECURE_CHANNEL)
-  uint8_t pairings[SC_PAIRING_ARRAY_LEN];
-#endif
   uint8_t instance_uid[UID_LENGTH];
   uint8_t confirm_export;
   uint8_t confirm_sign;
@@ -131,19 +101,6 @@ unsigned char G_io_seproxyhal_spi_buffer[IO_SEPROXYHAL_BUFFER_SIZE_B];
 
 uint8_t G_key_uid[HASH_LEN];
 
-#if defined(SECURE_CHANNEL)
-cx_ecfp_private_key_t G_sc_private_key;
-cx_ecfp_public_key_t G_sc_public_key;
-uint8_t G_sc_secret[SC_SECRET_LENGTH];
-char G_sc_pairing_password[SC_PAIRING_PASS_LEN + 1];
-int8_t G_sc_preallocated_offset;
-uint8_t G_sc_open;
-uint8_t G_sc_session_data[SC_SECRET_LENGTH];
-uint8_t G_sc_keys[SC_SECRET_LENGTH * 2];
-uint8_t* G_sc_enc_key = G_sc_keys;
-uint8_t* G_sc_mac_key = &G_sc_keys[SC_SECRET_LENGTH];
-#endif
-
 uint32_t G_bip32_path[MAX_BIP32_PATH];
 int G_bip32_path_len;
 
@@ -155,10 +112,6 @@ uint8_t G_tmp_export_make_current;
 uint8_t G_tmp_hash[HASH_LEN];
 
 static void ui_idle(void);
-
-#if defined(SECURE_CHANNEL)
-void sc_generate_pairing_password(unsigned int ignored);
-#endif
 
 ux_state_t ux;
 
@@ -387,8 +340,8 @@ const bagl_element_t ui_sign_nanos[] = {
   {{BAGL_ICON, 0x00, 3, 12, 7, 7, 0, 0, 0, 0xFFFFFF, 0x000000, 0, BAGL_GLYPH_ICON_CROSS }, NULL, 0, 0, 0, NULL, NULL, NULL},
   {{BAGL_ICON, 0x00, 117,  13, 8, 6, 0, 0, 0, 0xFFFFFF, 0x000000, 0, BAGL_GLYPH_ICON_CHECK }, NULL, 0, 0, 0, NULL, NULL, NULL},
 
-  {{BAGL_LABELINE, EVT_SIGN, 0, 12, 128, 32, 0, 0, 0, 0xFFFFFF, 0x000000, BAGL_FONT_OPEN_SANS_EXTRABOLD_11px|BAGL_FONT_ALIGNMENT_CENTER, 0  }, "Sign", 0, 0, 0, NULL, NULL, NULL},
-  {{BAGL_LABELINE, EVT_SIGN, 0, 26, 128, 32, 0, 0, 0, 0xFFFFFF, 0x000000, BAGL_FONT_OPEN_SANS_EXTRABOLD_11px|BAGL_FONT_ALIGNMENT_CENTER, 0  }, "transaction?", 0, 0, 0, NULL, NULL, NULL},
+  {{BAGL_LABELINE, EVT_SIGN, 0, 12, 128, 32, 0, 0, 0, 0xFFFFFF, 0x000000, BAGL_FONT_OPEN_SANS_EXTRABOLD_11px|BAGL_FONT_ALIGNMENT_CENTER, 0 }, "Sign", 0, 0, 0, NULL, NULL, NULL},
+  {{BAGL_LABELINE, EVT_SIGN, 0, 26, 128, 32, 0, 0, 0, 0xFFFFFF, 0x000000, BAGL_FONT_OPEN_SANS_EXTRABOLD_11px|BAGL_FONT_ALIGNMENT_CENTER, 0 }, "transaction?", 0, 0, 0, NULL, NULL, NULL},
 };
 
 unsigned int ui_sign_nanos_button(unsigned int button_mask, unsigned int button_mask_counter) {
@@ -410,24 +363,6 @@ unsigned int ui_export_key_nanos_button(unsigned int button_mask, unsigned int b
   UNUSED(button_mask_counter);
   return ui_nanos_button_handler(button_mask, &ui_export_key_nanos[3]);
 }
-
-#if defined(SECURE_CHANNEL)
-const bagl_element_t ui_pair_nanos[] = {
-  // {{type, userid, x, y, width, height, stroke, radius, fill, fgcolor, bgcolor, font_id, icon_id}, text, touch_area_brim, overfgcolor, overbgcolor, tap, out, over }
-  {{BAGL_RECTANGLE, 0x00, 0, 0, 128, 32, 0, 0, BAGL_FILL, 0x000000, 0xFFFFFF, 0, 0}, NULL, 0, 0, 0, NULL, NULL, NULL},
-
-  {{BAGL_LABELINE, 0x00, 0, 12, 128, 32, 0, 0, 0, 0xFFFFFF, 0x000000, BAGL_FONT_OPEN_SANS_EXTRABOLD_11px|BAGL_FONT_ALIGNMENT_CENTER, 0  }, "Pairing password", 0, 0, 0, NULL, NULL, NULL},
-  {{BAGL_LABELINE, 0x00, 0, 26, 128, 32, 0, 0, 0, 0xFFFFFF, 0x000000, BAGL_FONT_OPEN_SANS_EXTRABOLD_11px|BAGL_FONT_ALIGNMENT_CENTER, 0  }, G_sc_pairing_password, 0, 0, 0, NULL, NULL, NULL},
-};
-
-unsigned int ui_pair_nanos_button(unsigned int button_mask, unsigned int button_mask_counter) {
-  UNUSED(button_mask);
-  UNUSED(button_mask_counter);
-
-  UX_MENU_DISPLAY(0, menu_main, NULL);
-  return 0;
-}
-#endif
 #endif
 
 unsigned short io_exchange_al(unsigned char channel, unsigned short tx_len) {
@@ -462,216 +397,6 @@ static void ui_idle(void) {
   UX_MENU_DISPLAY(0, menu_main, NULL);
   #endif
 }
-
-#if defined(SECURE_CHANNEL)
-uint8_t sc_available_pairings() {
-  uint8_t count = 0;
-
-  for (int i = 0; i < SC_PAIRING_ARRAY_LEN; i += SC_PAIRING_KEY_LEN) {
-    if (N_storage.pairings[i] == 0) {
-      count++;
-    }
-  }
-
-  return count;
-}
-
-uint8_t sc_preallocate_pairing_index() {
-  G_sc_preallocated_offset = -1;
-
-  for (int i = 0; i < SC_PAIRING_ARRAY_LEN; i += SC_PAIRING_KEY_LEN) {
-    if (N_storage.pairings[i] == 0) {
-      G_sc_preallocated_offset = i;
-      return 1;
-    }
-  }
-
-  return 0;
-}
-
-uint8_t sc_verify_mac(unsigned char* apdu) {
-  return 0;
-}
-
-void sc_append_mac(unsigned char* apdu, volatile unsigned int *tx) {
-
-}
-
-void sc_decrypt_data(unsigned char* apdu) {
-
-}
-
-void sc_encrypt_data(unsigned char* apdu, volatile unsigned int *tx) {
-
-}
-
-void sc_postprocess_apdu(unsigned char* apdu, volatile unsigned int *tx) {
-  sc_encrypt_data(apdu, tx);
-  sc_append_mac(apdu, tx);
-}
-
-void sc_preprocess_apdu(unsigned char* apdu) {
-  if (!sc_verify_mac(apdu)) {
-    THROW(0x6982);
-  }
-
-  sc_decrypt_data(apdu);
-}
-
-// This implementation assumes that the output size matches the key size.
-void sc_pbkdf2_sha256(const char *pass, size_t pass_len, uint8_t *asalt, size_t salt_len, unsigned int rounds, uint8_t obuf[HASH_LEN]) {
-	uint8_t d1[HASH_LEN];
-  uint8_t d2[HASH_LEN];
-
-	cx_hmac_sha256((unsigned char *) pass, pass_len, asalt, salt_len, d1);
-	os_memmove(obuf, d1, HASH_LEN);
-
-	for (unsigned int i = 1; i < rounds; i++) {
-		cx_hmac_sha256((unsigned char *) pass, pass_len, d1, HASH_LEN, d2);
-		os_memmove(d1, d2, HASH_LEN);
-		for (unsigned int j = 0; j < HASH_LEN; j++) {
-			obuf[j] ^= d1[j];
-    }
-	}
-
-	os_memset(d1, 0, HASH_LEN);
-  os_memset(d2, 0, HASH_LEN);
-}
-
-void sc_generate_pairing_password(unsigned int ignored) {
-  cx_rng((unsigned char *) G_sc_pairing_password, SC_PAIRING_PASS_LEN);
-
-  for (int i = 0; i < SC_PAIRING_PASS_LEN; i++) {
-    G_sc_pairing_password[i] = '0' + (G_sc_pairing_password[i] % 10);
-  }
-
-  G_sc_pairing_password[SC_PAIRING_PASS_LEN] = '\0';
-
-  uint8_t salt[] = "Keycard Pairing Password Salt\0\0\0\1";
-  sc_pbkdf2_sha256(G_sc_pairing_password, SC_PAIRING_PASS_LEN, salt, sizeof(salt), 500, G_sc_secret);
-
-  //PRINTF("Secret:\n %.*H \n\n", SC_SECRET_LENGTH, G_sc_secret);
-
-  #if defined(TARGET_BLUE)
-  // TODO: implement Ledger Blue UI
-  #elif defined(TARGET_NANOS)
-  UX_DISPLAY(ui_pair_nanos, NULL);
-  #endif
-}
-
-void sc_pair_step1(unsigned char* apdu_data, unsigned char* apdu_out, volatile unsigned int *flags, volatile unsigned int *tx) {
-  if (!sc_preallocate_pairing_index()) {
-    THROW(0x6A84);
-  }
-
-  cx_sha256_t sha256;
-  cx_sha256_init(&sha256);
-  cx_hash((cx_hash_t *) &sha256, 0, G_sc_secret, SC_SECRET_LENGTH, NULL);
-  cx_hash((cx_hash_t *) &sha256, CX_LAST, apdu_data, SC_SECRET_LENGTH, apdu_out);
-  cx_rng(&apdu_out[HASH_LEN], HASH_LEN);
-  *tx = (HASH_LEN * 2);
-
-  cx_sha256_init(&sha256);
-  cx_hash((cx_hash_t *) &sha256, 0, G_sc_secret, SC_SECRET_LENGTH, NULL);
-  cx_hash((cx_hash_t *) &sha256, CX_LAST, apdu_out, SC_SECRET_LENGTH, G_sc_session_data);
-}
-
-void sc_pair_step2(unsigned char* apdu_data, unsigned char* apdu_out, volatile unsigned int *flags, volatile unsigned int *tx) {
-  if (G_sc_preallocated_offset == -1) {
-    THROW(0x6A86);
-  }
-
-  if (os_memcmp(apdu_data, C_instance_aid, INSTANCE_AID_LEN) != 0) {
-    THROW(0x6982);
-  }
-
-  apdu_out[0] = (G_sc_preallocated_offset / SC_PAIRING_KEY_LEN);
-  uint8_t pairing[SC_PAIRING_KEY_LEN];
-  pairing[0] = 1;
-
-  cx_rng(&apdu_out[1], HASH_LEN);
-
-  cx_sha256_t sha256;
-  cx_sha256_init(&sha256);
-  cx_hash((cx_hash_t *) &sha256, 0, G_sc_secret, SC_SECRET_LENGTH, NULL);
-  cx_hash((cx_hash_t *) &sha256, CX_LAST, &apdu_out[1], SC_SECRET_LENGTH, &pairing[1]);
-
-  nvm_write(&N_storage.pairings[G_sc_preallocated_offset], pairing, SC_PAIRING_KEY_LEN);
-  G_sc_preallocated_offset = 0;
-}
-
-void sc_pair(uint8_t p1, uint8_t p2, uint8_t lc, unsigned char* apdu_data, unsigned char* apdu_out, volatile unsigned int *flags, volatile unsigned int *tx) {
-  if (G_sc_open != SC_STATE_CLOSED) {
-    THROW(0x6985);
-  }
-
-  if (lc != SC_SECRET_LENGTH) {
-    THROW(0x6A80);
-  }
-
-  switch(p1) {
-    case PAIR_P1_FIRST_STEP:
-      sc_pair_step1(apdu_data, apdu_out, flags, tx);
-      break;
-    case PAIR_P1_LAST_STEP:
-      sc_pair_step2(apdu_data, apdu_out, flags, tx);
-      break;
-    default:
-      THROW(0x6A86);
-      break;
-  }
-
-  THROW(0x9000);
-}
-
-void sc_close() {
-  G_sc_open = SC_STATE_CLOSED;
-  G_sc_preallocated_offset = -1;
-}
-
-void sc_unpair(uint8_t p1, uint8_t p2, uint8_t lc, unsigned char* apdu_data, unsigned char* apdu_out, volatile unsigned int *flags, volatile unsigned int *tx) {
-}
-
-void sc_open_secure_channel(uint8_t p1, uint8_t p2, uint8_t lc, unsigned char* apdu_data, unsigned char* apdu_out, volatile unsigned int *flags, volatile unsigned int *tx) {
-  if (lc != EC_PUB_KEY_LEN) {
-    THROW(0x6A80);
-  }
-
-  if ((p1 >= SC_MAX_PAIRINGS) || (N_storage.pairings[p1 * SC_PAIRING_KEY_LEN] != 1)) {
-    THROW(0x6A86);
-  }
-
-  sc_close();
-
-  uint8_t secret[EC_COMPONENT_LEN];
-
-  cx_ecdh(&G_sc_private_key, CX_ECDH_X, apdu_data, secret);
-
-  cx_rng(apdu_out, (HASH_LEN + SC_IV_LEN));
-
-  cx_sha512_t sha512;
-  cx_sha512_init(&sha512);
-  cx_hash((cx_hash_t *) &sha512, 0, secret, SC_SECRET_LENGTH, NULL);
-  cx_hash((cx_hash_t *) &sha512, 0, &N_storage.pairings[(p1 * SC_PAIRING_KEY_LEN) + 1], SC_SECRET_LENGTH, NULL);
-  cx_hash((cx_hash_t *) &sha512, CX_LAST, apdu_out, SC_SECRET_LENGTH, G_sc_keys);
-
-  *tx = (HASH_LEN + SC_IV_LEN);
-  G_sc_open = SC_STATE_OPENING;
-
-  THROW(0x9000);
-}
-
-void sc_mutually_authenticate(uint8_t p1, uint8_t p2, uint8_t lc, unsigned char* apdu_data, unsigned char* apdu_out, volatile unsigned int *flags, volatile unsigned int *tx) {
-  if (G_sc_open != SC_STATE_OPENING) {
-    THROW(0x6985);
-  }
-
-  cx_rng(apdu_out, SC_SECRET_LENGTH);
-  *tx = SC_SECRET_LENGTH;
-
-  G_sc_open = SC_STATE_OPEN;
-}
-#endif
 
 void keycard_get_status_app(unsigned char* out, volatile unsigned int *tx) {
   out[(*tx)++] = TLV_APPLICATION_STATUS_TEMPLATE;
@@ -779,7 +504,7 @@ void keycard_select(uint8_t p1, uint8_t p2, uint8_t lc, unsigned char* apdu_data
 
   #if defined(SECURE_CHANNEL)
   apdu_out[(*tx)++] = EC_PUB_KEY_LEN;
-  os_memmove(&apdu_out[*tx], G_sc_public_key.W, EC_PUB_KEY_LEN);
+  sc_copy_public_key(&apdu_out[*tx]);
   *tx += EC_PUB_KEY_LEN;
   #else
   apdu_out[(*tx)++] = 0x00;
@@ -922,7 +647,7 @@ void keycard_init_nvm() {
   if (N_storage.initialized != 0x01) {
     internalStorage_t storage;
     #if defined(SECURE_CHANNEL)
-    os_memset(storage.pairings, 0, SC_PAIRING_ARRAY_LEN);
+    sc_nvm_init();
     #endif
     cx_rng(storage.instance_uid, UID_LENGTH);
     storage.confirm_export = 0x01;
@@ -964,7 +689,7 @@ static void runloop(void) {
         uint8_t* apdu_out = G_io_apdu_buffer;
 
         #if defined(SECURE_CHANNEL)
-        if (G_sc_open != SC_STATE_CLOSED) {
+        if (sc_get_status() != SC_STATE_CLOSED) {
           sc_preprocess_apdu(G_io_apdu_buffer);
           apdu_data += SC_IV_LEN;
           apdu_out += SC_IV_LEN;
@@ -1108,8 +833,7 @@ __attribute__((section(".boot"))) int main(void) {
 
       #if defined(SECURE_CHANNEL)
       sc_close();
-      cx_rng(G_sc_secret, SC_SECRET_LENGTH);
-      cx_ecfp_generate_pair(CX_CURVE_256K1, &G_sc_public_key, &G_sc_private_key, 0);
+      sc_init(menu_main);
       #endif
 
       keycard_generate_key_uid();
