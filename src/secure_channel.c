@@ -94,6 +94,7 @@ void sc_postprocess_apdu(unsigned char* apdu, volatile unsigned int *tx) {
 
 void sc_preprocess_apdu(unsigned char* apdu) {
   if (!sc_verify_mac(apdu)) {
+    sc_close();
     THROW(0x6982);
   }
 

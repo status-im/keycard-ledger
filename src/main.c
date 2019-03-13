@@ -189,22 +189,34 @@ static const bagl_element_t* io_seproxyhal_touch_ok(const bagl_element_t *e) {
   unsigned int tx = 0;
   unsigned short sw;
 
-  //TODO: add secure channel
+  uint8_t* apdu_out = G_io_apdu_buffer;
+
+  #if defined(SECURE_CHANNEL)
+  if (sc_get_status() == SC_STATE_OPEN) {
+    apdu_out += SC_IV_LEN;
+  }
+  #endif
 
   switch (e->component.userid) {
     case EVT_SIGN:
-      sw = keycard_do_sign(G_io_apdu_buffer, &tx);
+      sw = keycard_do_sign(apdu_out, &tx);
       break;
     case EVT_EXPORT:
-      sw = keycard_do_export(G_io_apdu_buffer, &tx);
+      sw = keycard_do_export(apdu_out, &tx);
       break;
     default:
       sw = 0x6F00;
       break;
   }
 
-  G_io_apdu_buffer[tx++] = sw >> 8;
-  G_io_apdu_buffer[tx++] = sw;
+  apdu_out[tx++] = sw >> 8;
+  apdu_out[tx++] = sw;
+
+  #if defined(SECURE_CHANNEL)
+  if (sc_get_status() == SC_STATE_OPEN) {
+    sc_postprocess_apdu(G_io_apdu_buffer, &tx);
+  }
+  #endif
 
   // Send back the response, do not restart the event loop
   io_exchange(CHANNEL_APDU | IO_RETURN_AFTER_TX, tx);
@@ -671,6 +683,9 @@ static void runloop(void) {
   for (;;) {
     volatile unsigned short sw = 0;
 
+    uint8_t* apdu_data = &G_io_apdu_buffer[OFFSET_CDATA];
+    uint8_t* apdu_out = G_io_apdu_buffer;
+
     BEGIN_TRY {
       TRY {
         rx = tx;
@@ -684,9 +699,6 @@ static void runloop(void) {
         if (rx == 0) {
           THROW(0x6982);
         }
-
-        uint8_t* apdu_data = &G_io_apdu_buffer[OFFSET_CDATA];
-        uint8_t* apdu_out = G_io_apdu_buffer;
 
         #if defined(SECURE_CHANNEL)
         if (sc_get_status() != SC_STATE_CLOSED) {
@@ -763,10 +775,16 @@ static void runloop(void) {
           sw = 0x6800 | (e & 0x7FF);
           break;
         }
-        // Unexpected exception => report
-        G_io_apdu_buffer[tx] = sw >> 8;
-        G_io_apdu_buffer[tx + 1] = sw;
+
+        apdu_out[tx] = sw >> 8;
+        apdu_out[tx + 1] = sw;
         tx += 2;
+
+        #if defined(SECURE_CHANNEL)
+        if (sc_get_status() != SC_STATE_OPEN) {
+          sc_postprocess_apdu(G_io_apdu_buffer, &tx);
+        }
+        #endif
       }
       FINALLY {
       }
