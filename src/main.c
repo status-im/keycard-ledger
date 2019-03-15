@@ -858,7 +858,6 @@ __attribute__((section(".boot"))) int main(void) {
       io_seproxyhal_init();
 
       #if defined(SECURE_CHANNEL)
-      sc_close();
       sc_init(menu_main);
       #endif
 

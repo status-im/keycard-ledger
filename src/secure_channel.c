@@ -56,6 +56,7 @@ void sc_init(ux_menu_entry_t *main_menu) {
   G_main_menu = main_menu;
   cx_rng(G_sc_secret, SC_SECRET_LENGTH);
   cx_ecfp_generate_pair(CX_CURVE_256K1, &G_sc_public_key, &G_sc_private_key, 0);
+  sc_close();
 }
 
 uint8_t sc_preallocate_pairing_index() {
@@ -237,7 +238,7 @@ void sc_copy_public_key(uint8_t* dst) {
 void sc_unpair(uint8_t p1, uint8_t p2, uint8_t lc, unsigned char* apdu_data, unsigned char* apdu_out, volatile unsigned int *flags, volatile unsigned int *tx) {
   ASSERT_OPEN_SECURE_CHANNEL();
 
-  if (p1 >= SC_MAX_PAIRINGS)) {
+  if (p1 >= SC_MAX_PAIRINGS) {
     THROW(0x6A86);
   }
 
