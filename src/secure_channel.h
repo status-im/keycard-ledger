@@ -15,6 +15,12 @@
 #define SC_STATE_OPENING 1
 #define SC_STATE_OPEN 2
 
+#if defined(SECURE_CHANNEL)
+#define ASSERT_OPEN_SECURE_CHANNEL() if (sc_get_status() != SC_STATE_OPEN) THROW(0x6985);
+#else
+#define ASSERT_OPEN_SECURE_CHANNEL()
+#endif
+
 void sc_nvm_init();
 void sc_init();
 

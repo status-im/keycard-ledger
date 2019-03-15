@@ -235,6 +235,19 @@ void sc_copy_public_key(uint8_t* dst) {
 }
 
 void sc_unpair(uint8_t p1, uint8_t p2, uint8_t lc, unsigned char* apdu_data, unsigned char* apdu_out, volatile unsigned int *flags, volatile unsigned int *tx) {
+  ASSERT_OPEN_SECURE_CHANNEL();
+
+  if (p1 >= SC_MAX_PAIRINGS)) {
+    THROW(0x6A86);
+  }
+
+  if (N_pairings[p1 * SC_PAIRING_KEY_LEN] == 1) {
+    uint8_t pairing[SC_PAIRING_KEY_LEN];
+    os_memset(pairing, 0, SC_PAIRING_KEY_LEN);
+    nvm_write(&N_pairings[p1 * SC_PAIRING_KEY_LEN], pairing, SC_PAIRING_KEY_LEN);
+  }
+
+  THROW(0x9000);
 }
 
 void sc_open_secure_channel(uint8_t p1, uint8_t p2, uint8_t lc, unsigned char* apdu_data, unsigned char* apdu_out, volatile unsigned int *flags, volatile unsigned int *tx) {

@@ -82,12 +82,6 @@
 #define CAPABILITIES 0x00
 #endif
 
-#if defined(SECURE_CHANNEL)
-#define ASSERT_OPEN_SECURE_CHANNEL() if (sc_get_status() != SC_STATE_OPEN) THROW(0x6985);
-#else
-#define ASSERT_OPEN_SECURE_CHANNEL()
-#endif
-
 #define EVT_SIGN 0
 #define EVT_EXPORT 1
 
