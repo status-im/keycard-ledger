@@ -2,19 +2,11 @@
 #include "crypto.h"
 #include "ctaes.h"
 
-int aes_cbc_iso9797m2_encrypt(uint8_t* key, uint8_t* iv, uint8_t* data, int data_len, uint8_t* out) {
-  int padded_len = data_len + ((data_len + 1) % 16) + 1;
-
-  data[data_len++] = 0x80;
-
-  while(padded_len > data_len) {
-    data[data_len++] = 0x00;
-  }
-
+static void aes_cbc_encrypt(uint8_t* key, uint8_t* iv, uint8_t* data, int data_len, uint8_t* out, uint8_t out_increment) {
   AES256_ctx aes256;
   AES256_init(&aes256, key);
 
-  int block_count = (padded_len / 16);
+  int block_count = (data_len / 16);
 
   uint8_t block[16];
 
@@ -24,7 +16,7 @@ int aes_cbc_iso9797m2_encrypt(uint8_t* key, uint8_t* iv, uint8_t* data, int data
 
   data += 16;
 
-  AES256_encrypt_block(&aes256, block, out);
+  AES256_encrypt_block(&aes256, out, block);
 
   while (--block_count) {
     for (int i = 0; i < 16; i++) {
@@ -32,10 +24,31 @@ int aes_cbc_iso9797m2_encrypt(uint8_t* key, uint8_t* iv, uint8_t* data, int data
     }
 
     data += 16;
-    out += 16;
+    out += out_increment;
 
     AES256_encrypt_block(&aes256, out, block);
   }
+}
+
+int aes_encrypt_block(uint8_t* key, uint8_t* data, uint8_t* out) {
+  AES256_ctx aes256;
+  AES256_init(&aes256, key);
+
+  AES256_encrypt_block(&aes256, out, data);
+
+  return 16;
+}
+
+int aes_cbc_iso9797m2_encrypt(uint8_t* key, uint8_t* iv, uint8_t* data, int data_len, uint8_t* out) {
+  int padded_len = data_len + ((data_len + 1) % 16) + 1;
+
+  data[data_len++] = 0x80;
+
+  while(padded_len > data_len) {
+    data[data_len++] = 0x00;
+  }
+
+  aes_cbc_encrypt(key, iv, data, padded_len, out, 16);
 
   return padded_len;
 }
@@ -73,11 +86,13 @@ int aes_cbc_iso9797m2_decrypt(uint8_t* key, uint8_t* iv, uint8_t* data, int data
   return data_len;
 }
 
-int aes_cmac_sign(uint8_t* key, uint8_t* data, int data_len, uint8_t* out) {
+int aes_cmac_compute(uint8_t* key, uint8_t* iv, uint8_t* data, int data_len, uint8_t* out) {
+  if (data_len % 16) {
+    return -1;
+  }
 
+  aes_cbc_encrypt(key, iv, data, data_len, out, 0);
+  return 16;
 }
 
-uint8_t aes_cmac_verify(uint8_t* key, uint8_t* data, int data_len, uint8_t* signature) {
-
-}
 #endif

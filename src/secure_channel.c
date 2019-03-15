@@ -71,34 +71,36 @@ uint8_t sc_preallocate_pairing_index() {
   return 0;
 }
 
-uint8_t sc_verify_mac(unsigned char* apdu) {
-  return 0;
-}
-
-void sc_append_mac(unsigned char* apdu, volatile unsigned int *tx) {
-
-}
-
-void sc_decrypt_data(unsigned char* apdu) {
-
-}
-
-void sc_encrypt_data(unsigned char* apdu, volatile unsigned int *tx) {
-
-}
-
 void sc_postprocess_apdu(unsigned char* apdu, volatile unsigned int *tx) {
-  sc_encrypt_data(apdu, tx);
-  sc_append_mac(apdu, tx);
+  *tx = aes_cbc_iso9797m2_encrypt(G_sc_enc_key, G_sc_session_data, &apdu[SC_IV_LEN], *tx, &apdu[SC_IV_LEN]);
+  uint8_t tmp[SC_IV_LEN];
+  tmp[0] = *tx + SC_IV_LEN;
+  os_memset(&tmp[OFFSET_CDATA], 0, SC_IV_LEN - 1);
+  aes_encrypt_block(G_sc_mac_key, tmp, apdu);
+  aes_cmac_compute(G_sc_mac_key, apdu, &apdu[SC_IV_LEN], *tx, apdu);
+  os_memmove(G_sc_session_data, apdu, SC_IV_LEN);
+  *tx += SC_IV_LEN;
 }
 
 void sc_preprocess_apdu(unsigned char* apdu) {
-  if (!sc_verify_mac(apdu)) {
+  int data_len = apdu[OFFSET_LC] - SC_IV_LEN;
+
+  uint8_t mac[SC_IV_LEN];
+  uint8_t tmp[SC_IV_LEN];
+
+  os_memmove(tmp, apdu, OFFSET_CDATA);
+  os_memset(&tmp[OFFSET_CDATA], 0, SC_IV_LEN - OFFSET_CDATA);
+
+  aes_encrypt_block(G_sc_mac_key, tmp, mac);
+  aes_cmac_compute(G_sc_mac_key, mac, &apdu[OFFSET_CDATA + SC_IV_LEN], data_len, mac);
+
+  if (os_secure_memcmp(mac, &apdu[OFFSET_CDATA], SC_IV_LEN) != 0) {
     sc_close();
     THROW(0x6982);
   }
 
-  sc_decrypt_data(apdu);
+  apdu[OFFSET_LC] = aes_cbc_iso9797m2_decrypt(G_sc_enc_key, G_sc_session_data, &apdu[OFFSET_CDATA + SC_IV_LEN], data_len, &apdu[OFFSET_CDATA + SC_IV_LEN]);
+  os_memmove(G_sc_session_data, &apdu[OFFSET_CDATA], SC_IV_LEN);
 }
 
 // This implementation assumes that the output size matches the key size.
@@ -132,8 +134,6 @@ void sc_generate_pairing_password(unsigned int ignored) {
 
   uint8_t salt[] = "Keycard Pairing Password Salt\0\0\0\1";
   sc_pbkdf2_sha256(G_sc_pairing_password, SC_PAIRING_PASS_LEN, salt, sizeof(salt), 500, G_sc_secret);
-
-  //PRINTF("Secret:\n %.*H \n\n", SC_SECRET_LENGTH, G_sc_secret);
 
   #if defined(TARGET_BLUE)
   // TODO: implement Ledger Blue UI
@@ -251,6 +251,7 @@ void sc_open_secure_channel(uint8_t p1, uint8_t p2, uint8_t lc, unsigned char* a
   cx_ecdh(&G_sc_private_key, CX_ECDH_X, apdu_data, secret);
 
   cx_rng(apdu_out, (HASH_LEN + SC_IV_LEN));
+  os_memmove(G_sc_session_data, &apdu_out[HASH_LEN], SC_IV_LEN);
 
   cx_sha512_t sha512;
   cx_sha512_init(&sha512);

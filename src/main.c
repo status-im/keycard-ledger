@@ -781,7 +781,7 @@ static void runloop(void) {
         tx += 2;
 
         #if defined(SECURE_CHANNEL)
-        if (sc_get_status() != SC_STATE_OPEN) {
+        if (sc_get_status() == SC_STATE_OPEN) {
           sc_postprocess_apdu(G_io_apdu_buffer, &tx);
         }
         #endif
