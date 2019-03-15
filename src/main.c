@@ -82,6 +82,12 @@
 #define CAPABILITIES 0x00
 #endif
 
+#if defined(SECURE_CHANNEL)
+#define ASSERT_OPEN_SECURE_CHANNEL() if (sc_get_status() != SC_STATE_OPEN) THROW(0x6985);
+#else
+#define ASSERT_OPEN_SECURE_CHANNEL()
+#endif
+
 #define EVT_SIGN 0
 #define EVT_EXPORT 1
 
@@ -435,6 +441,7 @@ void keycard_get_status_keypath(unsigned char* out, volatile unsigned int *tx) {
 
 void keycard_get_status(uint8_t p1, uint8_t p2, uint8_t lc, unsigned char* apdu_data, unsigned char* apdu_out, volatile unsigned int *flags, volatile unsigned int *tx) {
   UNUSED(flags);
+  ASSERT_OPEN_SECURE_CHANNEL();
 
   switch (p1) {
     case GET_STATUS_P1_APP_STATUS:
@@ -550,6 +557,7 @@ void keycard_select(uint8_t p1, uint8_t p2, uint8_t lc, unsigned char* apdu_data
 void keycard_derive(uint8_t p1, uint8_t p2, uint8_t lc, unsigned char* apdu_data, unsigned char* apdu_out, volatile unsigned int *flags, volatile unsigned int *tx) {
   UNUSED(flags);
   UNUSED(tx);
+  ASSERT_OPEN_SECURE_CHANNEL();
 
   keycard_copy_path(p1, apdu_data, lc, G_bip32_path, &G_bip32_path_len);
 
@@ -557,7 +565,7 @@ void keycard_derive(uint8_t p1, uint8_t p2, uint8_t lc, unsigned char* apdu_data
 }
 
  void keycard_sign(uint8_t p1, uint8_t p2, uint8_t lc, unsigned char* apdu_data, unsigned char* apdu_out, volatile unsigned int *flags, volatile unsigned int *tx) {
-  UNUSED(tx);
+  ASSERT_OPEN_SECURE_CHANNEL();
 
   if (lc != HASH_LEN) {
     THROW(0x6A80);
@@ -586,6 +594,10 @@ inline void validate_eip_1581_path(const uint32_t* path, int len) {
 }
 
 void keycard_set_pinless_path(uint8_t p1, uint8_t p2, uint8_t lc, unsigned char* apdu_data, unsigned char* apdu_out, volatile unsigned int *flags, volatile unsigned int *tx) {
+  UNUSED(flags);
+  UNUSED(tx);
+  ASSERT_OPEN_SECURE_CHANNEL();
+
   // A pinless path does not make sense on the Ledger, since the Ledger requires PIN entry only to turn on, not on every transaction.
   if (((lc / 4) > MAX_BIP32_PATH) || lc % 4 != 0) {
     THROW(0x6A80);
@@ -595,6 +607,8 @@ void keycard_set_pinless_path(uint8_t p1, uint8_t p2, uint8_t lc, unsigned char*
 }
 
 void keycard_export(uint8_t p1, uint8_t p2, uint8_t lc, unsigned char* apdu_data, unsigned char* apdu_out, volatile unsigned int *flags, volatile unsigned int *tx) {
+  ASSERT_OPEN_SECURE_CHANNEL();
+
   os_memmove(G_tmp_bip32_path, G_bip32_path, (G_bip32_path_len * 4));
   G_tmp_bip32_path_len = G_bip32_path_len;
 
