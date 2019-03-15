@@ -133,7 +133,7 @@ void sc_generate_pairing_password(unsigned int ignored) {
   G_sc_pairing_password[SC_PAIRING_PASS_LEN] = '\0';
 
   uint8_t salt[] = "Keycard Pairing Password Salt\0\0\0\1";
-  sc_pbkdf2_sha256(G_sc_pairing_password, SC_PAIRING_PASS_LEN, salt, sizeof(salt), 500, G_sc_secret);
+  sc_pbkdf2_sha256(G_sc_pairing_password, SC_PAIRING_PASS_LEN, salt, sizeof(salt) - 1, 500, G_sc_secret);
 
   #if defined(TARGET_BLUE)
   // TODO: implement Ledger Blue UI
