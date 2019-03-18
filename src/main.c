@@ -681,6 +681,7 @@ static void runloop(void) {
   volatile unsigned int rx = 0;
   volatile unsigned int tx = 0;
   volatile unsigned int flags = 0;
+  volatile unsigned int data_offset = 0;
 
   // DESIGN NOTE: the bootloader ignores the way APDU are fetched. The only
   // goal is to retrieve APDU.
@@ -690,9 +691,6 @@ static void runloop(void) {
   // APDU injection faults.
   for (;;) {
     volatile unsigned short sw = 0;
-
-    uint8_t* apdu_data = &G_io_apdu_buffer[OFFSET_CDATA];
-    uint8_t* apdu_out = G_io_apdu_buffer;
 
     BEGIN_TRY {
       TRY {
@@ -711,24 +709,25 @@ static void runloop(void) {
         #if defined(SECURE_CHANNEL)
         if (sc_get_status() != SC_STATE_CLOSED) {
           sc_preprocess_apdu(G_io_apdu_buffer);
-          apdu_data += SC_IV_LEN;
-          apdu_out += SC_IV_LEN;
+          data_offset = SC_IV_LEN;
+        } else {
+          data_offset = 0;
         }
         #endif
 
         switch (G_io_apdu_buffer[OFFSET_INS]) {
           #if defined(SECURE_CHANNEL)
           case INS_PAIR:
-            sc_pair(G_io_apdu_buffer[OFFSET_P1], G_io_apdu_buffer[OFFSET_P2], G_io_apdu_buffer[OFFSET_LC], apdu_data, apdu_out, &flags, &tx);
+            sc_pair(G_io_apdu_buffer[OFFSET_P1], G_io_apdu_buffer[OFFSET_P2], G_io_apdu_buffer[OFFSET_LC], &G_io_apdu_buffer[OFFSET_CDATA + data_offset], &G_io_apdu_buffer[data_offset], &flags, &tx);
             break;
           case INS_UNPAIR:
-            sc_unpair(G_io_apdu_buffer[OFFSET_P1], G_io_apdu_buffer[OFFSET_P2], G_io_apdu_buffer[OFFSET_LC], apdu_data, apdu_out, &flags, &tx);
+            sc_unpair(G_io_apdu_buffer[OFFSET_P1], G_io_apdu_buffer[OFFSET_P2], G_io_apdu_buffer[OFFSET_LC], &G_io_apdu_buffer[OFFSET_CDATA + data_offset], &G_io_apdu_buffer[data_offset], &flags, &tx);
             break;
           case INS_OPEN_SECURE_CHANNEL:
-            sc_open_secure_channel(G_io_apdu_buffer[OFFSET_P1], G_io_apdu_buffer[OFFSET_P2], G_io_apdu_buffer[OFFSET_LC], apdu_data, apdu_out, &flags, &tx);
+            sc_open_secure_channel(G_io_apdu_buffer[OFFSET_P1], G_io_apdu_buffer[OFFSET_P2], G_io_apdu_buffer[OFFSET_LC], &G_io_apdu_buffer[OFFSET_CDATA + data_offset], &G_io_apdu_buffer[data_offset], &flags, &tx);
             break;
           case INS_MUTUALLY_AUTHENTICATE:
-            sc_mutually_authenticate(G_io_apdu_buffer[OFFSET_P1], G_io_apdu_buffer[OFFSET_P2], G_io_apdu_buffer[OFFSET_LC], apdu_data, apdu_out, &flags, &tx);
+            sc_mutually_authenticate(G_io_apdu_buffer[OFFSET_P1], G_io_apdu_buffer[OFFSET_P2], G_io_apdu_buffer[OFFSET_LC], &G_io_apdu_buffer[OFFSET_CDATA + data_offset], &G_io_apdu_buffer[data_offset], &flags, &tx);
             break;
           #else
           case INS_PAIR:
@@ -739,22 +738,22 @@ static void runloop(void) {
             break;
           #endif
           case INS_SELECT:
-            keycard_select(G_io_apdu_buffer[OFFSET_P1], G_io_apdu_buffer[OFFSET_P2], G_io_apdu_buffer[OFFSET_LC], apdu_data, apdu_out, &flags, &tx);
+            keycard_select(G_io_apdu_buffer[OFFSET_P1], G_io_apdu_buffer[OFFSET_P2], G_io_apdu_buffer[OFFSET_LC], &G_io_apdu_buffer[OFFSET_CDATA + data_offset], &G_io_apdu_buffer[data_offset], &flags, &tx);
             break;
           case INS_GET_STATUS:
-            keycard_get_status(G_io_apdu_buffer[OFFSET_P1], G_io_apdu_buffer[OFFSET_P2], G_io_apdu_buffer[OFFSET_LC], apdu_data, apdu_out, &flags, &tx);
+            keycard_get_status(G_io_apdu_buffer[OFFSET_P1], G_io_apdu_buffer[OFFSET_P2], G_io_apdu_buffer[OFFSET_LC], &G_io_apdu_buffer[OFFSET_CDATA + data_offset], &G_io_apdu_buffer[data_offset], &flags, &tx);
             break;
           case INS_DERIVE_KEY:
-            keycard_derive(G_io_apdu_buffer[OFFSET_P1], G_io_apdu_buffer[OFFSET_P2], G_io_apdu_buffer[OFFSET_LC], apdu_data, apdu_out, &flags, &tx);
+            keycard_derive(G_io_apdu_buffer[OFFSET_P1], G_io_apdu_buffer[OFFSET_P2], G_io_apdu_buffer[OFFSET_LC], &G_io_apdu_buffer[OFFSET_CDATA + data_offset], &G_io_apdu_buffer[data_offset], &flags, &tx);
             break;
           case INS_SIGN:
-            keycard_sign(G_io_apdu_buffer[OFFSET_P1], G_io_apdu_buffer[OFFSET_P2], G_io_apdu_buffer[OFFSET_LC], apdu_data, apdu_out, &flags, &tx);
+            keycard_sign(G_io_apdu_buffer[OFFSET_P1], G_io_apdu_buffer[OFFSET_P2], G_io_apdu_buffer[OFFSET_LC], &G_io_apdu_buffer[OFFSET_CDATA + data_offset], &G_io_apdu_buffer[data_offset], &flags, &tx);
             break;
           case INS_SET_PINLESS_PATH:
-          keycard_set_pinless_path(G_io_apdu_buffer[OFFSET_P1], G_io_apdu_buffer[OFFSET_P2], G_io_apdu_buffer[OFFSET_LC], apdu_data, apdu_out, &flags, &tx);
+          keycard_set_pinless_path(G_io_apdu_buffer[OFFSET_P1], G_io_apdu_buffer[OFFSET_P2], G_io_apdu_buffer[OFFSET_LC], &G_io_apdu_buffer[OFFSET_CDATA + data_offset], &G_io_apdu_buffer[data_offset], &flags, &tx);
             break;
           case INS_EXPORT_KEY:
-            keycard_export(G_io_apdu_buffer[OFFSET_P1], G_io_apdu_buffer[OFFSET_P2], G_io_apdu_buffer[OFFSET_LC], apdu_data, apdu_out, &flags, &tx);
+            keycard_export(G_io_apdu_buffer[OFFSET_P1], G_io_apdu_buffer[OFFSET_P2], G_io_apdu_buffer[OFFSET_LC], &G_io_apdu_buffer[OFFSET_CDATA + data_offset], &G_io_apdu_buffer[data_offset], &flags, &tx);
             break;
           case INS_INIT:
           case INS_VERIFY_PIN:
@@ -784,8 +783,10 @@ static void runloop(void) {
           break;
         }
 
-        apdu_out[tx++] = sw >> 8;
-        apdu_out[tx++] = sw;
+        G_io_apdu_buffer[data_offset + tx] = sw >> 8;
+        G_io_apdu_buffer[data_offset + tx + 1] = sw;
+
+        tx += 2;
 
         #if defined(SECURE_CHANNEL)
         if (sc_get_status() == SC_STATE_OPEN) {
