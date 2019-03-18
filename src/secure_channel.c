@@ -20,9 +20,13 @@ char G_sc_pairing_password[SC_PAIRING_PASS_LEN + 1];
 int8_t G_sc_preallocated_offset;
 uint8_t G_sc_open;
 uint8_t G_sc_session_data[SC_SECRET_LENGTH];
-uint8_t G_sc_keys[SC_SECRET_LENGTH * 2];
-uint8_t* G_sc_enc_key = G_sc_keys;
-uint8_t* G_sc_mac_key = &G_sc_keys[SC_SECRET_LENGTH];
+
+typedef struct secure_channel_keys_t {
+  uint8_t enc_key[SC_SECRET_LENGTH];
+  uint8_t mac_key[SC_SECRET_LENGTH];
+} secure_channel_keys_t;
+
+secure_channel_keys_t G_sc_keys;
 
 ux_menu_entry_t *G_main_menu;
 
@@ -73,12 +77,12 @@ uint8_t sc_preallocate_pairing_index() {
 }
 
 void sc_postprocess_apdu(unsigned char* apdu, volatile unsigned int *tx) {
-  *tx = aes_cbc_iso9797m2_encrypt(G_sc_enc_key, G_sc_session_data, &apdu[SC_IV_LEN], *tx, &apdu[SC_IV_LEN]);
+  *tx = aes_cbc_iso9797m2_encrypt(G_sc_keys.enc_key, G_sc_session_data, &apdu[SC_IV_LEN], *tx, &apdu[SC_IV_LEN]);
   uint8_t tmp[SC_IV_LEN];
   tmp[0] = *tx + SC_IV_LEN;
   os_memset(&tmp[OFFSET_CDATA], 0, SC_IV_LEN - 1);
-  aes_encrypt_block(G_sc_mac_key, tmp, apdu);
-  aes_cmac_compute(G_sc_mac_key, apdu, &apdu[SC_IV_LEN], *tx, apdu);
+  aes_encrypt_block(G_sc_keys.mac_key, tmp, apdu);
+  aes_cmac_compute(G_sc_keys.mac_key, apdu, &apdu[SC_IV_LEN], *tx, apdu);
   os_memmove(G_sc_session_data, apdu, SC_IV_LEN);
   *tx += SC_IV_LEN;
 }
@@ -92,15 +96,15 @@ void sc_preprocess_apdu(unsigned char* apdu) {
   os_memmove(tmp, apdu, OFFSET_CDATA);
   os_memset(&tmp[OFFSET_CDATA], 0, SC_IV_LEN - OFFSET_CDATA);
 
-  aes_encrypt_block(G_sc_mac_key, tmp, mac);
-  aes_cmac_compute(G_sc_mac_key, mac, &apdu[OFFSET_CDATA + SC_IV_LEN], data_len, mac);
+  aes_encrypt_block(G_sc_keys.mac_key, tmp, mac);
+  aes_cmac_compute(G_sc_keys.mac_key, mac, &apdu[OFFSET_CDATA + SC_IV_LEN], data_len, mac);
 
   if (os_secure_memcmp(mac, &apdu[OFFSET_CDATA], SC_IV_LEN) != 0) {
     sc_close();
     THROW(0x6982);
   }
 
-  int res = aes_cbc_iso9797m2_decrypt(G_sc_enc_key, G_sc_session_data, &apdu[OFFSET_CDATA + SC_IV_LEN], data_len, &apdu[OFFSET_CDATA + SC_IV_LEN]);
+  int res = aes_cbc_iso9797m2_decrypt(G_sc_keys.enc_key, G_sc_session_data, &apdu[OFFSET_CDATA + SC_IV_LEN], data_len, &apdu[OFFSET_CDATA + SC_IV_LEN]);
 
   if (res < 0) {
     sc_close();
@@ -280,7 +284,7 @@ void sc_open_secure_channel(uint8_t p1, uint8_t p2, uint8_t lc, unsigned char* a
   cx_sha512_init(&sha512);
   cx_hash((cx_hash_t *) &sha512, 0, secret, SC_SECRET_LENGTH, NULL);
   cx_hash((cx_hash_t *) &sha512, 0, &N_pairings[(p1 * SC_PAIRING_KEY_LEN) + 1], SC_SECRET_LENGTH, NULL);
-  cx_hash((cx_hash_t *) &sha512, CX_LAST, apdu_out, SC_SECRET_LENGTH, G_sc_keys);
+  cx_hash((cx_hash_t *) &sha512, CX_LAST, apdu_out, SC_SECRET_LENGTH, G_sc_keys.enc_key);
 
   *tx = (HASH_LEN + SC_IV_LEN);
   G_sc_open = SC_STATE_OPENING;

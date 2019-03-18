@@ -62,7 +62,7 @@ int aes_cbc_iso9797m2_decrypt(uint8_t* key, uint8_t* iv, uint8_t* data, int data
   uint8_t* cipher = data + data_len;
   uint8_t* plain = out + data_len;
 
-  while (cipher > (data + 16)) {
+  while (cipher > data) {
     AES256_decrypt_block(&aes256, plain, cipher);
     cipher -= 16;
 
@@ -79,7 +79,7 @@ int aes_cbc_iso9797m2_decrypt(uint8_t* key, uint8_t* iv, uint8_t* data, int data
     plain[i] = plain[i] ^ iv[i];
   }
 
-  while(data_len > 1 && out[--data_len] != 0x80) ;
+  while(data_len > 0 && out[--data_len] != 0x80) ;
 
   return data_len;
 }
