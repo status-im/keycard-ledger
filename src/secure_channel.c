@@ -80,11 +80,13 @@ void sc_postprocess_apdu(unsigned char* apdu, volatile unsigned int *tx) {
   *tx = aes_cbc_iso9797m2_encrypt(G_sc_keys.enc_key, G_sc_session_data, &apdu[SC_IV_LEN], *tx, &apdu[SC_IV_LEN]);
   uint8_t tmp[SC_IV_LEN];
   tmp[0] = *tx + SC_IV_LEN;
-  os_memset(&tmp[OFFSET_CDATA], 0, SC_IV_LEN - 1);
+  os_memset(&tmp[1], 0, SC_IV_LEN - 1);
   aes_encrypt_block(G_sc_keys.mac_key, tmp, apdu);
   aes_cmac_compute(G_sc_keys.mac_key, apdu, &apdu[SC_IV_LEN], *tx, apdu);
   os_memmove(G_sc_session_data, apdu, SC_IV_LEN);
   *tx += SC_IV_LEN;
+  apdu[(*tx)++] = 0x90;
+  apdu[(*tx)++] = 0x00;
 }
 
 void sc_preprocess_apdu(unsigned char* apdu) {
@@ -301,6 +303,7 @@ void sc_mutually_authenticate(uint8_t p1, uint8_t p2, uint8_t lc, unsigned char*
   *tx = SC_SECRET_LENGTH;
 
   G_sc_open = SC_STATE_OPEN;
+  THROW(0x9000);
 }
 
 #endif

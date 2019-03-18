@@ -784,9 +784,8 @@ static void runloop(void) {
           break;
         }
 
-        apdu_out[tx] = sw >> 8;
-        apdu_out[tx + 1] = sw;
-        tx += 2;
+        apdu_out[tx++] = sw >> 8;
+        apdu_out[tx++] = sw;
 
         #if defined(SECURE_CHANNEL)
         if (sc_get_status() == SC_STATE_OPEN) {
