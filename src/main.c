@@ -210,7 +210,7 @@ static const bagl_element_t* io_seproxyhal_touch_ok(const bagl_element_t *e) {
   }
 
   G_io_apdu_buffer[data_offset + tx] = sw >> 8;
-  apdu_out[data_offset + tx + 1] = sw;
+  G_io_apdu_buffer[data_offset + tx + 1] = sw;
 
   tx += 2;
 
@@ -701,6 +701,7 @@ static void runloop(void) {
         // an error
         rx = io_exchange(CHANNEL_APDU | flags, rx);
         flags = 0;
+        data_offset = 0;
 
         // no apdu received, well, reset the session, and reset the
         // bootloader configuration
@@ -708,14 +709,28 @@ static void runloop(void) {
           THROW(0x6982);
         }
 
-        #if defined(SECURE_CHANNEL)
-        if (sc_get_status() != SC_STATE_CLOSED) {
-          sc_preprocess_apdu(G_io_apdu_buffer);
-          data_offset = SC_IV_LEN;
-        } else {
-          data_offset = 0;
+        switch (G_io_apdu_buffer[OFFSET_INS]) {
+          case INS_SELECT:
+            keycard_select(G_io_apdu_buffer[OFFSET_P1], G_io_apdu_buffer[OFFSET_P2], G_io_apdu_buffer[OFFSET_LC], &G_io_apdu_buffer[OFFSET_CDATA + data_offset], &G_io_apdu_buffer[data_offset], &flags, &tx);
+            break;
+          #if defined(SECURE_CHANNEL)
+          case INS_OPEN_SECURE_CHANNEL:
+            sc_open_secure_channel(G_io_apdu_buffer[OFFSET_P1], G_io_apdu_buffer[OFFSET_P2], G_io_apdu_buffer[OFFSET_LC], &G_io_apdu_buffer[OFFSET_CDATA + data_offset], &G_io_apdu_buffer[data_offset], &flags, &tx);
+            break;
+          default:
+            if (sc_get_status() == SC_STATE_OPEN || (sc_get_status() == SC_STATE_OPENING && G_io_apdu_buffer[OFFSET_INS] == INS_MUTUALLY_AUTHENTICATE)) {
+              sc_preprocess_apdu(G_io_apdu_buffer);
+              data_offset = SC_IV_LEN;
+            }
+            break;
+          #else
+          case INS_OPEN_SECURE_CHANNEL:
+            THROW(0x6A81);
+            break;
+          default:
+            break;
+          #endif
         }
-        #endif
 
         switch (G_io_apdu_buffer[OFFSET_INS]) {
           #if defined(SECURE_CHANNEL)
@@ -725,23 +740,16 @@ static void runloop(void) {
           case INS_UNPAIR:
             sc_unpair(G_io_apdu_buffer[OFFSET_P1], G_io_apdu_buffer[OFFSET_P2], G_io_apdu_buffer[OFFSET_LC], &G_io_apdu_buffer[OFFSET_CDATA + data_offset], &G_io_apdu_buffer[data_offset], &flags, &tx);
             break;
-          case INS_OPEN_SECURE_CHANNEL:
-            sc_open_secure_channel(G_io_apdu_buffer[OFFSET_P1], G_io_apdu_buffer[OFFSET_P2], G_io_apdu_buffer[OFFSET_LC], &G_io_apdu_buffer[OFFSET_CDATA + data_offset], &G_io_apdu_buffer[data_offset], &flags, &tx);
-            break;
           case INS_MUTUALLY_AUTHENTICATE:
             sc_mutually_authenticate(G_io_apdu_buffer[OFFSET_P1], G_io_apdu_buffer[OFFSET_P2], G_io_apdu_buffer[OFFSET_LC], &G_io_apdu_buffer[OFFSET_CDATA + data_offset], &G_io_apdu_buffer[data_offset], &flags, &tx);
             break;
           #else
           case INS_PAIR:
           case INS_UNPAIR:
-          case INS_OPEN_SECURE_CHANNEL:
           case INS_MUTUALLY_AUTHENTICATE:
             THROW(0x6A81);
             break;
           #endif
-          case INS_SELECT:
-            keycard_select(G_io_apdu_buffer[OFFSET_P1], G_io_apdu_buffer[OFFSET_P2], G_io_apdu_buffer[OFFSET_LC], &G_io_apdu_buffer[OFFSET_CDATA + data_offset], &G_io_apdu_buffer[data_offset], &flags, &tx);
-            break;
           case INS_GET_STATUS:
             keycard_get_status(G_io_apdu_buffer[OFFSET_P1], G_io_apdu_buffer[OFFSET_P2], G_io_apdu_buffer[OFFSET_LC], &G_io_apdu_buffer[OFFSET_CDATA + data_offset], &G_io_apdu_buffer[data_offset], &flags, &tx);
             break;
@@ -784,6 +792,14 @@ static void runloop(void) {
             sw = 0x6800 | (e & 0x7FF);
             break;
         }
+
+        #if defined(SECURE_CHANNEL)
+        if (sw == 0x6982) {
+          data_offset = 0;
+        } else if (sw == 0x6802) {
+          sw = 0x6A80;
+        }
+        #endif
 
         G_io_apdu_buffer[data_offset + tx] = sw >> 8;
         G_io_apdu_buffer[data_offset + tx + 1] = sw;

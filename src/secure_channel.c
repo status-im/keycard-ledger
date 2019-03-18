@@ -200,7 +200,7 @@ void sc_pair_step2(unsigned char* apdu_data, unsigned char* apdu_out, volatile u
 }
 
 void sc_pair(uint8_t p1, uint8_t p2, uint8_t lc, unsigned char* apdu_data, unsigned char* apdu_out, volatile unsigned int *flags, volatile unsigned int *tx) {
-  if (G_sc_open != SC_STATE_CLOSED) {
+  if (G_sc_open == SC_STATE_OPEN) {
     THROW(0x6985);
   }
 
@@ -265,6 +265,8 @@ void sc_unpair(uint8_t p1, uint8_t p2, uint8_t lc, unsigned char* apdu_data, uns
 }
 
 void sc_open_secure_channel(uint8_t p1, uint8_t p2, uint8_t lc, unsigned char* apdu_data, unsigned char* apdu_out, volatile unsigned int *flags, volatile unsigned int *tx) {
+  sc_close();
+
   if (lc != EC_PUB_KEY_LEN) {
     THROW(0x6A80);
   }
@@ -272,8 +274,6 @@ void sc_open_secure_channel(uint8_t p1, uint8_t p2, uint8_t lc, unsigned char* a
   if ((p1 >= SC_MAX_PAIRINGS) || (N_pairings[p1 * SC_PAIRING_KEY_LEN] != 1)) {
     THROW(0x6A86);
   }
-
-  sc_close();
 
   uint8_t secret[EC_COMPONENT_LEN];
 
@@ -297,6 +297,11 @@ void sc_open_secure_channel(uint8_t p1, uint8_t p2, uint8_t lc, unsigned char* a
 void sc_mutually_authenticate(uint8_t p1, uint8_t p2, uint8_t lc, unsigned char* apdu_data, unsigned char* apdu_out, volatile unsigned int *flags, volatile unsigned int *tx) {
   if (G_sc_open != SC_STATE_OPENING) {
     THROW(0x6985);
+  }
+
+  if (lc != SC_SECRET_LENGTH) {
+    sc_close();
+    THROW(0x6982);
   }
 
   cx_rng(apdu_out, SC_SECRET_LENGTH);
