@@ -189,28 +189,30 @@ static const bagl_element_t* io_seproxyhal_touch_ok(const bagl_element_t *e) {
   unsigned int tx = 0;
   unsigned short sw;
 
-  uint8_t* apdu_out = G_io_apdu_buffer;
+  uint8_t data_offset = 0;
 
   #if defined(SECURE_CHANNEL)
   if (sc_get_status() == SC_STATE_OPEN) {
-    apdu_out += SC_IV_LEN;
+    data_offset = SC_IV_LEN;
   }
   #endif
 
   switch (e->component.userid) {
     case EVT_SIGN:
-      sw = keycard_do_sign(apdu_out, &tx);
+      sw = keycard_do_sign(&G_io_apdu_buffer[data_offset], &tx);
       break;
     case EVT_EXPORT:
-      sw = keycard_do_export(apdu_out, &tx);
+      sw = keycard_do_export(&G_io_apdu_buffer[data_offset], &tx);
       break;
     default:
       sw = 0x6F00;
       break;
   }
 
-  apdu_out[tx++] = sw >> 8;
-  apdu_out[tx++] = sw;
+  G_io_apdu_buffer[data_offset + tx] = sw >> 8;
+  apdu_out[data_offset + tx + 1] = sw;
+
+  tx += 2;
 
   #if defined(SECURE_CHANNEL)
   if (sc_get_status() == SC_STATE_OPEN) {
@@ -776,11 +778,11 @@ static void runloop(void) {
         switch (e & 0xF000) {
           case 0x6000:
           case 0x9000:
-          sw = e;
-          break;
+            sw = e;
+            break;
           default:
-          sw = 0x6800 | (e & 0x7FF);
-          break;
+            sw = 0x6800 | (e & 0x7FF);
+            break;
         }
 
         G_io_apdu_buffer[data_offset + tx] = sw >> 8;
