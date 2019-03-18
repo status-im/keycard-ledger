@@ -17,7 +17,7 @@ cx_ecfp_private_key_t G_sc_private_key;
 cx_ecfp_public_key_t G_sc_public_key;
 uint8_t G_sc_secret[SC_SECRET_LENGTH];
 char G_sc_pairing_password[SC_PAIRING_PASS_LEN + 1];
-int8_t G_sc_preallocated_offset;
+int16_t G_sc_preallocated_offset;
 uint8_t G_sc_open;
 uint8_t G_sc_session_data[SC_SECRET_LENGTH];
 
