@@ -100,7 +100,14 @@ void sc_preprocess_apdu(unsigned char* apdu) {
     THROW(0x6982);
   }
 
-  apdu[OFFSET_LC] = aes_cbc_iso9797m2_decrypt(G_sc_enc_key, G_sc_session_data, &apdu[OFFSET_CDATA + SC_IV_LEN], data_len, &apdu[OFFSET_CDATA + SC_IV_LEN]);
+  int res = aes_cbc_iso9797m2_decrypt(G_sc_enc_key, G_sc_session_data, &apdu[OFFSET_CDATA + SC_IV_LEN], data_len, &apdu[OFFSET_CDATA + SC_IV_LEN]);
+
+  if (res < 0) {
+    sc_close();
+    THROW(0x6982);
+  }
+
+  apdu[OFFSET_LC] = res;
   os_memmove(G_sc_session_data, &apdu[OFFSET_CDATA], SC_IV_LEN);
 }
 

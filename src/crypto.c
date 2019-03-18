@@ -2,8 +2,9 @@
 #include "crypto.h"
 #include "ctaes.h"
 
+AES256_ctx aes256;
+
 static void aes_cbc_encrypt(uint8_t* key, uint8_t* iv, uint8_t* data, int data_len, uint8_t* out, uint8_t out_increment) {
-  AES256_ctx aes256;
   AES256_init(&aes256, key);
 
   int block_count = (data_len / 16);
@@ -31,16 +32,14 @@ static void aes_cbc_encrypt(uint8_t* key, uint8_t* iv, uint8_t* data, int data_l
 }
 
 int aes_encrypt_block(uint8_t* key, uint8_t* data, uint8_t* out) {
-  AES256_ctx aes256;
   AES256_init(&aes256, key);
-
   AES256_encrypt_block(&aes256, out, data);
 
   return 16;
 }
 
 int aes_cbc_iso9797m2_encrypt(uint8_t* key, uint8_t* iv, uint8_t* data, int data_len, uint8_t* out) {
-  int padded_len = data_len + ((data_len + 1) % 16) + 1;
+  int padded_len = data_len + (16 - ((data_len + 1) % 16)) + 1;
 
   data[data_len++] = 0x80;
 
@@ -58,7 +57,6 @@ int aes_cbc_iso9797m2_decrypt(uint8_t* key, uint8_t* iv, uint8_t* data, int data
     return -1;
   }
 
-  AES256_ctx aes256;
   AES256_init(&aes256, key);
 
   uint8_t* cipher = data + data_len;
