@@ -323,7 +323,11 @@ const ux_menu_entry_t menu_about[] = {
 };
 
 const ux_menu_entry_t menu_main[] = {
+  #if defined (TEST_BUILD)
+  {NULL, NULL, 0, NULL, "Keycard", "TEST BUILD", 0, 0},
+  #else
   {NULL, NULL, 0, NULL, "Keycard", "by Status", 0, 0},
+  #endif
   {menu_about, NULL, 0, NULL, "About", NULL, 0, 0},
   {menu_settings, NULL, 0, NULL, "Settings", NULL, 0, 0},
   #if defined(SECURE_CHANNEL)
@@ -672,8 +676,15 @@ void keycard_init_nvm() {
     sc_nvm_init();
     #endif
     cx_rng(storage.instance_uid, UID_LENGTH);
+
+    #if defined(TEST_BUILD)
+    storage.confirm_export = 0x00;
+    storage.confirm_sign = 0x00;
+    #else
     storage.confirm_export = 0x01;
     storage.confirm_sign = 0x01;
+    #endif
+
     storage.initialized = 0x01;
     nvm_write(&N_storage, (void*)&storage, sizeof(internalStorage_t));
   }
