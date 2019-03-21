@@ -28,6 +28,7 @@ void sc_preprocess_apdu(unsigned char* apdu);
 void sc_postprocess_apdu(unsigned char* apdu, volatile unsigned int *tx);
 
 void sc_generate_pairing_password(unsigned int ignored);
+void sc_clear_pairings(unsigned int ignored);
 
 void sc_pair(uint8_t p1, uint8_t p2, uint8_t lc, unsigned char* apdu_data, unsigned char* apdu_out, volatile unsigned int *flags, volatile unsigned int *tx);
 void sc_unpair(uint8_t p1, uint8_t p2, uint8_t lc, unsigned char* apdu_data, unsigned char* apdu_out, volatile unsigned int *flags, volatile unsigned int *tx);

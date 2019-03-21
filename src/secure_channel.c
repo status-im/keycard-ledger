@@ -48,6 +48,34 @@ unsigned int ui_pair_nanos_button(unsigned int button_mask, unsigned int button_
   UX_MENU_DISPLAY(0, G_main_menu, NULL);
   return 0;
 }
+
+const bagl_element_t ui_clear_pairings_nanos[] = {
+  // {{type, userid, x, y, width, height, stroke, radius, fill, fgcolor, bgcolor, font_id, icon_id}, text, touch_area_brim, overfgcolor, overbgcolor, tap, out, over }
+  {{BAGL_RECTANGLE, 0x00, 0, 0, 128, 32, 0, 0, BAGL_FILL, 0x000000, 0xFFFFFF, 0, 0}, NULL, 0, 0, 0, NULL, NULL, NULL},
+  {{BAGL_ICON, 0x00, 3, 12, 7, 7, 0, 0, 0, 0xFFFFFF, 0x000000, 0, BAGL_GLYPH_ICON_CROSS }, NULL, 0, 0, 0, NULL, NULL, NULL},
+  {{BAGL_ICON, 0x00, 117,  13, 8, 6, 0, 0, 0, 0xFFFFFF, 0x000000, 0, BAGL_GLYPH_ICON_CHECK }, NULL, 0, 0, 0, NULL, NULL, NULL},
+
+  {{BAGL_LABELINE, 0, 0, 12, 128, 32, 0, 0, 0, 0xFFFFFF, 0x000000, BAGL_FONT_OPEN_SANS_EXTRABOLD_11px|BAGL_FONT_ALIGNMENT_CENTER, 0 }, "Clear all", 0, 0, 0, NULL, NULL, NULL},
+  {{BAGL_LABELINE, 0, 0, 26, 128, 32, 0, 0, 0, 0xFFFFFF, 0x000000, BAGL_FONT_OPEN_SANS_EXTRABOLD_11px|BAGL_FONT_ALIGNMENT_CENTER, 0 }, "pairings?", 0, 0, 0, NULL, NULL, NULL},
+};
+
+unsigned int ui_clear_pairings_nanos_button(unsigned int button_mask, unsigned int button_mask_counter) {
+  UNUSED(button_mask_counter);
+
+  switch(button_mask) {
+    case BUTTON_EVT_RELEASED | BUTTON_LEFT:
+      break;
+
+    case BUTTON_EVT_RELEASED | BUTTON_RIGHT: {
+      sc_nvm_init();
+      break;
+    }
+  }
+
+  UX_MENU_DISPLAY(0, G_main_menu, NULL);
+  
+  return 0;
+}
 #endif
 
 void sc_nvm_init() {
@@ -154,6 +182,10 @@ void sc_generate_pairing_password(unsigned int ignored) {
   #elif defined(TARGET_NANOS)
   UX_DISPLAY(ui_pair_nanos, NULL);
   #endif
+}
+
+void sc_clear_pairings(unsigned int ignored) {
+  UX_DISPLAY(ui_clear_pairings_nanos, NULL);
 }
 
 void sc_pair_step1(unsigned char* apdu_data, unsigned char* apdu_out, volatile unsigned int *flags, volatile unsigned int *tx) {

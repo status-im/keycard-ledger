@@ -332,6 +332,7 @@ const ux_menu_entry_t menu_main[] = {
   {menu_settings, NULL, 0, NULL, "Settings", NULL, 0, 0},
   #if defined(SECURE_CHANNEL)
   {NULL, sc_generate_pairing_password, 0, NULL, "Pairing password", NULL, 0, 0},
+  {NULL, sc_clear_pairings, 0, NULL, "Clear pairings", NULL, 0, 0},
   #endif
   {NULL, os_sched_exit, 0, &C_icon_dashboard, "Quit app", NULL, 50, 29},
   UX_MENU_END
