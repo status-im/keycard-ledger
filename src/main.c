@@ -46,6 +46,11 @@
 #define INS_PAIR 0x12
 #define INS_UNPAIR 0x13
 
+#define SIGN_P1_CURRENT 0x00
+#define SIGN_P1_DERIVE 0x01
+#define SIGN_P1_DERIVE_AND_MAKE_CURRENT 0x02
+#define SIGN_P1_PINLESS 0x03
+
 #define DERIVE_KEY_P1_MASTER 0x00
 #define DERIVE_KEY_P1_PARENT 0x40
 #define DERIVE_KEY_P1_CURRENT 0x80
@@ -87,6 +92,7 @@
 
 typedef struct internalStorage_t {
   uint8_t instance_uid[UID_LENGTH];
+  uint32_t pinless_path[MAX_BIP32_PATH + 1];
   uint8_t confirm_export;
   uint8_t confirm_sign;
   uint8_t initialized;
@@ -107,7 +113,7 @@ int G_bip32_path_len;
 uint32_t G_tmp_bip32_path[MAX_BIP32_PATH];
 int G_tmp_bip32_path_len;
 uint8_t G_tmp_export_public_only;
-uint8_t G_tmp_export_make_current;
+uint8_t G_make_current;
 
 uint8_t G_tmp_hash[HASH_LEN];
 
@@ -177,7 +183,7 @@ unsigned short keycard_do_export(unsigned char* out, volatile unsigned int *tx) 
   os_memmove(&out[*tx], public_key.W, EC_PUB_KEY_LEN);
   *tx += EC_PUB_KEY_LEN;
 
-  if (G_tmp_export_make_current) {
+  if (G_make_current) {
     os_memmove(G_bip32_path, G_tmp_bip32_path, (G_tmp_bip32_path_len * 4));
     G_bip32_path_len = G_tmp_bip32_path_len;
   }
@@ -566,26 +572,26 @@ void keycard_derive(uint8_t p1, uint8_t p2, uint8_t lc, unsigned char* apdu_data
 }
 
  void keycard_sign(uint8_t p1, uint8_t p2, uint8_t lc, unsigned char* apdu_data, unsigned char* apdu_out, volatile unsigned int *flags, volatile unsigned int *tx) {
-  ASSERT_OPEN_SECURE_CHANNEL();
+   ASSERT_OPEN_SECURE_CHANNEL();
 
-  if (lc != HASH_LEN) {
-    THROW(0x6A80);
-  }
+   if (lc != HASH_LEN) {
+     THROW(0x6A80);
+   }
 
-  os_memmove(G_tmp_hash, apdu_data, HASH_LEN);
+   os_memmove(G_tmp_hash, apdu_data, HASH_LEN);
 
-  if (N_storage.confirm_sign) {
-    #if defined(TARGET_BLUE)
-    // TODO: implement Ledger Blue UI
-    #elif defined(TARGET_NANOS)
-    UX_DISPLAY(ui_sign_nanos, NULL);
-    #endif
+   if (N_storage.confirm_sign) {
+     #if defined(TARGET_BLUE)
+     // TODO: implement Ledger Blue UI
+     #elif defined(TARGET_NANOS)
+     UX_DISPLAY(ui_sign_nanos, NULL);
+     #endif
 
-    *flags |= IO_ASYNCH_REPLY;
-  } else {
-    unsigned short sw = keycard_do_sign(apdu_out, tx);
-    THROW(sw);
-  }
+     *flags |= IO_ASYNCH_REPLY;
+   } else {
+     unsigned short sw = keycard_do_sign(apdu_out, tx);
+     THROW(sw);
+   }
 }
 
 inline void validate_eip_1581_path(const uint32_t* path, int len) {
@@ -599,12 +605,13 @@ void keycard_set_pinless_path(uint8_t p1, uint8_t p2, uint8_t lc, unsigned char*
   UNUSED(tx);
   ASSERT_OPEN_SECURE_CHANNEL();
 
-  // A pinless path does not make sense on the Ledger, since the Ledger requires PIN entry only to turn on, not on every transaction.
-  if (((lc / 4) > MAX_BIP32_PATH) || lc % 4 != 0) {
-    THROW(0x6A80);
-  } else {
-    THROW(0x9000);
-  }
+  uint32_t data[MAX_BIP32_PATH + 1];
+
+  keycard_copy_path(DERIVE_KEY_P1_MASTER, apdu_data, lc, &data[1], (int *) &data[0]);
+
+  nvm_write(&N_storage.pinless_path, data, ((MAX_BIP32_PATH + 1) * 4));
+
+  THROW(0x9000);
 }
 
 void keycard_export(uint8_t p1, uint8_t p2, uint8_t lc, unsigned char* apdu_data, unsigned char* apdu_out, volatile unsigned int *flags, volatile unsigned int *tx) {
@@ -613,13 +620,13 @@ void keycard_export(uint8_t p1, uint8_t p2, uint8_t lc, unsigned char* apdu_data
   os_memmove(G_tmp_bip32_path, G_bip32_path, (G_bip32_path_len * 4));
   G_tmp_bip32_path_len = G_bip32_path_len;
 
-  G_tmp_export_make_current = 0;
+  G_make_current = 0;
 
   switch (p1 & ~DERIVE_KEY_P1_MASK) {
     case EXPORT_KEY_P1_CURRENT:
       break;
     case EXPORT_KEY_P1_DERIVE_AND_MAKE_CURRENT:
-      G_tmp_export_make_current = 1;
+      G_make_current = 1;
     case EXPORT_KEY_P1_DERIVE:
       keycard_copy_path((p1 & DERIVE_KEY_P1_MASK), apdu_data, lc, G_tmp_bip32_path, &G_tmp_bip32_path_len);
       break;
@@ -669,7 +676,7 @@ void keycard_init_nvm() {
   G_bip32_path_len = 0;
   G_tmp_bip32_path_len = 0;
   G_tmp_export_public_only = 0;
-  G_tmp_export_make_current = 0;
+  G_make_current = 0;
 
   if (N_storage.initialized != 0x01) {
     internalStorage_t storage;
@@ -677,6 +684,7 @@ void keycard_init_nvm() {
     sc_nvm_init();
     #endif
     cx_rng(storage.instance_uid, UID_LENGTH);
+    storage.pinless_path[0] = 0;
 
     #if defined(TEST_BUILD)
     storage.confirm_export = 0x00;
