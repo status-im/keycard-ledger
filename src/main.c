@@ -121,6 +121,13 @@ static void ui_idle(void);
 
 ux_state_t ux;
 
+void keycard_check_and_make_current() {
+  if (G_make_current) {
+    os_memmove(G_bip32_path, G_tmp_bip32_path, (G_tmp_bip32_path_len * 4));
+    G_bip32_path_len = G_tmp_bip32_path_len;
+  }
+}
+
 void keycard_derive_key(uint32_t* path, int path_len, cx_ecfp_private_key_t* private_key, cx_ecfp_public_key_t* public_key) {
   uint8_t private_key_data[EC_COMPONENT_LEN];
 
@@ -138,7 +145,7 @@ unsigned short keycard_do_sign(unsigned char* out, volatile unsigned int *tx) {
   cx_ecfp_private_key_t private_key;
   cx_ecfp_public_key_t public_key;
 
-  keycard_derive_key(G_bip32_path, G_bip32_path_len, &private_key, &public_key);
+  keycard_derive_key(G_tmp_bip32_path, G_tmp_bip32_path_len, &private_key, &public_key);
 
   out[(*tx)++] = TLV_SIGNATURE_TEMPLATE;
   out[(*tx)++] = 0x81;
@@ -154,6 +161,8 @@ unsigned short keycard_do_sign(unsigned char* out, volatile unsigned int *tx) {
 
   out[2] += signature_len;
   *tx += signature_len;
+
+  keycard_check_and_make_current();
 
   return 0x9000;
 }
@@ -183,10 +192,7 @@ unsigned short keycard_do_export(unsigned char* out, volatile unsigned int *tx) 
   os_memmove(&out[*tx], public_key.W, EC_PUB_KEY_LEN);
   *tx += EC_PUB_KEY_LEN;
 
-  if (G_make_current) {
-    os_memmove(G_bip32_path, G_tmp_bip32_path, (G_tmp_bip32_path_len * 4));
-    G_bip32_path_len = G_tmp_bip32_path_len;
-  }
+  keycard_check_and_make_current();
 
   return 0x9000;
 }
@@ -572,15 +578,56 @@ void keycard_derive(uint8_t p1, uint8_t p2, uint8_t lc, unsigned char* apdu_data
 }
 
  void keycard_sign(uint8_t p1, uint8_t p2, uint8_t lc, unsigned char* apdu_data, unsigned char* apdu_out, volatile unsigned int *flags, volatile unsigned int *tx) {
-   ASSERT_OPEN_SECURE_CHANNEL();
+   uint8_t usePinless = 0;
+   uint8_t derive = 0;
 
-   if (lc != HASH_LEN) {
+   G_make_current = 0;
+
+   switch(p1 & ~DERIVE_KEY_P1_MASK) {
+     case SIGN_P1_CURRENT:
+       break;
+     case SIGN_P1_DERIVE_AND_MAKE_CURRENT:
+       G_make_current = 1;
+     case SIGN_P1_DERIVE:
+       derive = 1;
+       break;
+    case SIGN_P1_PINLESS:
+       usePinless = 1;
+       break;
+     default:
+       THROW(0x6A86);
+       break;
+   }
+
+   if ((derive && lc < (HASH_LEN + 4)) || (!derive && lc != HASH_LEN)) {
      THROW(0x6A80);
+   }
+
+   if (!usePinless) {
+     ASSERT_OPEN_SECURE_CHANNEL();
+
+     os_memmove(G_tmp_bip32_path, G_bip32_path, (G_bip32_path_len * 4));
+     G_tmp_bip32_path_len = G_bip32_path_len;
+
+     if (derive) {
+       keycard_copy_path((p1 & DERIVE_KEY_P1_MASK), &apdu_data[HASH_LEN], (lc - HASH_LEN), G_tmp_bip32_path, &G_tmp_bip32_path_len);
+     }
+   } else {
+     G_tmp_bip32_path_len = N_storage.pinless_path[0];
+
+     if (G_tmp_bip32_path_len == 0) {
+       THROW(0x6A88);
+     }
+     
+     os_memmove(G_tmp_bip32_path, &N_storage.pinless_path[1], (G_tmp_bip32_path_len * 4));
    }
 
    os_memmove(G_tmp_hash, apdu_data, HASH_LEN);
 
-   if (N_storage.confirm_sign) {
+   if (usePinless || !N_storage.confirm_sign) {
+     unsigned short sw = keycard_do_sign(apdu_out, tx);
+     THROW(sw);
+   } else {
      #if defined(TARGET_BLUE)
      // TODO: implement Ledger Blue UI
      #elif defined(TARGET_NANOS)
@@ -588,9 +635,6 @@ void keycard_derive(uint8_t p1, uint8_t p2, uint8_t lc, unsigned char* apdu_data
      #endif
 
      *flags |= IO_ASYNCH_REPLY;
-   } else {
-     unsigned short sw = keycard_do_sign(apdu_out, tx);
-     THROW(sw);
    }
 }
 
