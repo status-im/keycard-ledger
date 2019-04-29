@@ -28,11 +28,10 @@ typedef struct secure_channel_keys_t {
 
 secure_channel_keys_t G_sc_keys;
 
-ux_menu_entry_t *G_main_menu;
-
 #if defined(TARGET_BLUE)
 //TODO: BLUE GUI
 #elif defined(TARGET_NANOS)
+ux_menu_entry_t *G_main_menu;
 const bagl_element_t ui_pair_nanos[] = {
   // {{type, userid, x, y, width, height, stroke, radius, fill, fgcolor, bgcolor, font_id, icon_id}, text, touch_area_brim, overfgcolor, overbgcolor, tap, out, over }
   {{BAGL_RECTANGLE, 0x00, 0, 0, 128, 32, 0, 0, BAGL_FILL, 0x000000, 0xFFFFFF, 0, 0}, NULL, 0, 0, 0, NULL, NULL, NULL},
@@ -73,8 +72,12 @@ unsigned int ui_clear_pairings_nanos_button(unsigned int button_mask, unsigned i
   }
 
   UX_MENU_DISPLAY(0, G_main_menu, NULL);
-  
+
   return 0;
+}
+
+void sc_set_main_menu(ux_menu_entry_t *menu_main) {
+  G_main_menu = main_menu;
 }
 #endif
 
@@ -84,8 +87,7 @@ void sc_nvm_init() {
   nvm_write(N_pairings, pairings, SC_PAIRING_ARRAY_LEN);
 }
 
-void sc_init(ux_menu_entry_t *main_menu) {
-  G_main_menu = main_menu;
+void sc_init() {
   cx_rng(G_sc_secret, SC_SECRET_LENGTH);
   cx_ecfp_generate_pair(CX_CURVE_256K1, &G_sc_public_key, &G_sc_private_key, 0);
   sc_close();
@@ -150,11 +152,11 @@ void sc_pbkdf2_sha256(const char *pass, size_t pass_len, uint8_t *asalt, size_t 
 	uint8_t d1[HASH_LEN];
   uint8_t d2[HASH_LEN];
 
-	cx_hmac_sha256((unsigned char *) pass, pass_len, asalt, salt_len, d1);
+	cx_hmac_sha256((unsigned char *) pass, pass_len, asalt, salt_len, d1, HASH_LEN);
 	os_memmove(obuf, d1, HASH_LEN);
 
 	for (unsigned int i = 1; i < rounds; i++) {
-		cx_hmac_sha256((unsigned char *) pass, pass_len, d1, HASH_LEN, d2);
+		cx_hmac_sha256((unsigned char *) pass, pass_len, d1, HASH_LEN, d2, HASH_LEN);
 		os_memmove(d1, d2, HASH_LEN);
 		for (unsigned int j = 0; j < HASH_LEN; j++) {
 			obuf[j] ^= d1[j];
@@ -185,7 +187,11 @@ void sc_generate_pairing_password(unsigned int ignored) {
 }
 
 void sc_clear_pairings(unsigned int ignored) {
+  #if defined(TARGET_BLUE)
+  // TODO: implement Ledger Blue UI
+  #elif defined(TARGET_NANOS)
   UX_DISPLAY(ui_clear_pairings_nanos, NULL);
+  #endif
 }
 
 void sc_pair_step1(unsigned char* apdu_data, unsigned char* apdu_out, volatile unsigned int *flags, volatile unsigned int *tx) {
@@ -195,14 +201,14 @@ void sc_pair_step1(unsigned char* apdu_data, unsigned char* apdu_out, volatile u
 
   cx_sha256_t sha256;
   cx_sha256_init(&sha256);
-  cx_hash((cx_hash_t *) &sha256, 0, G_sc_secret, SC_SECRET_LENGTH, NULL);
-  cx_hash((cx_hash_t *) &sha256, CX_LAST, apdu_data, SC_SECRET_LENGTH, apdu_out);
+  cx_hash((cx_hash_t *) &sha256, 0, G_sc_secret, SC_SECRET_LENGTH, NULL, 0);
+  cx_hash((cx_hash_t *) &sha256, CX_LAST, apdu_data, SC_SECRET_LENGTH, apdu_out, HASH_LEN);
   cx_rng(&apdu_out[HASH_LEN], HASH_LEN);
   *tx = (HASH_LEN * 2);
 
   cx_sha256_init(&sha256);
-  cx_hash((cx_hash_t *) &sha256, 0, G_sc_secret, SC_SECRET_LENGTH, NULL);
-  cx_hash((cx_hash_t *) &sha256, CX_LAST, &apdu_out[HASH_LEN], SC_SECRET_LENGTH, G_sc_session_data);
+  cx_hash((cx_hash_t *) &sha256, 0, G_sc_secret, SC_SECRET_LENGTH, NULL, 0);
+  cx_hash((cx_hash_t *) &sha256, CX_LAST, &apdu_out[HASH_LEN], SC_SECRET_LENGTH, G_sc_session_data, HASH_LEN);
 }
 
 void sc_pair_step2(unsigned char* apdu_data, unsigned char* apdu_out, volatile unsigned int *flags, volatile unsigned int *tx) {
@@ -223,8 +229,8 @@ void sc_pair_step2(unsigned char* apdu_data, unsigned char* apdu_out, volatile u
 
   cx_sha256_t sha256;
   cx_sha256_init(&sha256);
-  cx_hash((cx_hash_t *) &sha256, 0, G_sc_secret, SC_SECRET_LENGTH, NULL);
-  cx_hash((cx_hash_t *) &sha256, CX_LAST, &apdu_out[1], SC_SECRET_LENGTH, &pairing[1]);
+  cx_hash((cx_hash_t *) &sha256, 0, G_sc_secret, SC_SECRET_LENGTH, NULL, 0);
+  cx_hash((cx_hash_t *) &sha256, CX_LAST, &apdu_out[1], SC_SECRET_LENGTH, &pairing[1], HASH_LEN);
 
   nvm_write(&N_pairings[G_sc_preallocated_offset], pairing, SC_PAIRING_KEY_LEN);
   G_sc_preallocated_offset = -1;
@@ -314,16 +320,16 @@ void sc_open_secure_channel(uint8_t p1, uint8_t p2, uint8_t lc, unsigned char* a
 
   uint8_t secret[EC_COMPONENT_LEN];
 
-  cx_ecdh(&G_sc_private_key, CX_ECDH_X, apdu_data, secret);
+  cx_ecdh(&G_sc_private_key, CX_ECDH_X, apdu_data, EC_PUB_KEY_LEN, secret, EC_COMPONENT_LEN);
 
   cx_rng(apdu_out, (HASH_LEN + SC_IV_LEN));
   os_memmove(G_sc_session_data, &apdu_out[HASH_LEN], SC_IV_LEN);
 
   cx_sha512_t sha512;
   cx_sha512_init(&sha512);
-  cx_hash((cx_hash_t *) &sha512, 0, secret, SC_SECRET_LENGTH, NULL);
-  cx_hash((cx_hash_t *) &sha512, 0, &N_pairings[(p1 * SC_PAIRING_KEY_LEN) + 1], SC_SECRET_LENGTH, NULL);
-  cx_hash((cx_hash_t *) &sha512, CX_LAST, apdu_out, SC_SECRET_LENGTH, G_sc_keys.enc_key);
+  cx_hash((cx_hash_t *) &sha512, 0, secret, SC_SECRET_LENGTH, NULL, 0);
+  cx_hash((cx_hash_t *) &sha512, 0, &N_pairings[(p1 * SC_PAIRING_KEY_LEN) + 1], SC_SECRET_LENGTH, NULL, 0);
+  cx_hash((cx_hash_t *) &sha512, CX_LAST, apdu_out, SC_SECRET_LENGTH, G_sc_keys.enc_key, CX_SHA512_SIZE);
 
   *tx = (HASH_LEN + SC_IV_LEN);
   G_sc_open = SC_STATE_OPENING;

@@ -119,7 +119,13 @@ uint8_t G_tmp_hash[HASH_LEN];
 
 static void ui_idle(void);
 
+#ifdef TARGET_NANOX
+#include "ux.h"
+ux_state_t G_ux;
+bolos_ux_params_t G_ux_params;
+#else
 ux_state_t ux;
+#endif
 
 void keycard_check_and_make_current() {
   if (G_make_current) {
@@ -156,7 +162,7 @@ unsigned short keycard_do_sign(unsigned char* out, volatile unsigned int *tx) {
   os_memmove(&out[*tx], public_key.W, EC_PUB_KEY_LEN);
   *tx += EC_PUB_KEY_LEN;
 
-  int signature_len = cx_ecdsa_sign(&private_key, CX_RND_RFC6979 | CX_LAST, CX_SHA256, G_tmp_hash, HASH_LEN, &out[*tx], NULL);
+  int signature_len = cx_ecdsa_sign(&private_key, CX_RND_RFC6979 | CX_LAST, CX_SHA256, G_tmp_hash, HASH_LEN, &out[*tx], 80, NULL);
   os_memset(&private_key, 0, sizeof(private_key));
 
   out[2] += signature_len;
@@ -241,8 +247,6 @@ static const bagl_element_t* io_seproxyhal_touch_ok(const bagl_element_t *e) {
 }
 
 static const bagl_element_t* io_seproxyhal_touch_cancel(const bagl_element_t *e) {
-  UNUSED(e);
-
   G_io_apdu_buffer[0] = 0x69;
   G_io_apdu_buffer[1] = 0x85;
 
@@ -300,12 +304,10 @@ void menu_settings_sign_change(unsigned int enabled) {
 }
 
 void menu_settings_export_init(unsigned int ignored) {
-  UNUSED(ignored);
   UX_MENU_DISPLAY(N_storage.confirm_export ? 1 : 0, menu_settings_export, NULL);
 }
 
 void menu_settings_sign_init(unsigned int ignored) {
-  UNUSED(ignored);
   UX_MENU_DISPLAY(N_storage.confirm_sign ? 1 : 0, menu_settings_sign, NULL);
 }
 
@@ -376,7 +378,6 @@ const bagl_element_t ui_sign_nanos[] = {
 };
 
 unsigned int ui_sign_nanos_button(unsigned int button_mask, unsigned int button_mask_counter) {
-  UNUSED(button_mask_counter);
   return ui_nanos_button_handler(button_mask, &ui_sign_nanos[3]);
 }
 
@@ -391,7 +392,6 @@ const bagl_element_t ui_export_key_nanos[] = {
 };
 
 unsigned int ui_export_key_nanos_button(unsigned int button_mask, unsigned int button_mask_counter) {
-  UNUSED(button_mask_counter);
   return ui_nanos_button_handler(button_mask, &ui_export_key_nanos[3]);
 }
 #endif
@@ -453,7 +453,6 @@ void keycard_get_status_keypath(unsigned char* out, volatile unsigned int *tx) {
 }
 
 void keycard_get_status(uint8_t p1, uint8_t p2, uint8_t lc, unsigned char* apdu_data, unsigned char* apdu_out, volatile unsigned int *flags, volatile unsigned int *tx) {
-  UNUSED(flags);
   ASSERT_OPEN_SECURE_CHANNEL();
 
   switch (p1) {
@@ -505,8 +504,6 @@ void keycard_copy_path(uint8_t mode, const uint8_t* src, int src_len, uint32_t* 
 }
 
 void keycard_select(uint8_t p1, uint8_t p2, uint8_t lc, unsigned char* apdu_data, unsigned char* apdu_out, volatile unsigned int *flags, volatile unsigned int *tx) {
-  UNUSED(flags);
-
   if (p1 != 0x04 || p2 != 0x00) {
     THROW(0x6A81);
   }
@@ -568,8 +565,6 @@ void keycard_select(uint8_t p1, uint8_t p2, uint8_t lc, unsigned char* apdu_data
 }
 
 void keycard_derive(uint8_t p1, uint8_t p2, uint8_t lc, unsigned char* apdu_data, unsigned char* apdu_out, volatile unsigned int *flags, volatile unsigned int *tx) {
-  UNUSED(flags);
-  UNUSED(tx);
   ASSERT_OPEN_SECURE_CHANNEL();
 
   keycard_copy_path(p1, apdu_data, lc, G_bip32_path, &G_bip32_path_len);
@@ -618,7 +613,7 @@ void keycard_derive(uint8_t p1, uint8_t p2, uint8_t lc, unsigned char* apdu_data
      if (G_tmp_bip32_path_len == 0) {
        THROW(0x6A88);
      }
-     
+
      os_memmove(G_tmp_bip32_path, &N_storage.pinless_path[1], (G_tmp_bip32_path_len * 4));
    }
 
@@ -645,8 +640,6 @@ inline void validate_eip_1581_path(const uint32_t* path, int len) {
 }
 
 void keycard_set_pinless_path(uint8_t p1, uint8_t p2, uint8_t lc, unsigned char* apdu_data, unsigned char* apdu_out, volatile unsigned int *flags, volatile unsigned int *tx) {
-  UNUSED(flags);
-  UNUSED(tx);
   ASSERT_OPEN_SECURE_CHANNEL();
 
   uint32_t data[MAX_BIP32_PATH + 1];
@@ -713,7 +706,7 @@ void keycard_generate_key_uid() {
   keycard_derive_key(G_tmp_bip32_path, 0, &private_key, &public_key);
   os_memset(&private_key, 0, sizeof(private_key));
 
-  cx_hash_sha256(public_key.W, EC_PUB_KEY_LEN, G_key_uid);
+  cx_hash_sha256(public_key.W, EC_PUB_KEY_LEN, G_key_uid, HASH_LEN);
 }
 
 void keycard_init_nvm() {
@@ -940,17 +933,20 @@ __attribute__((section(".boot"))) int main(void) {
       io_seproxyhal_init();
 
       #if defined(SECURE_CHANNEL)
-      sc_init(menu_main);
+      #if defined (TARGET_NANOS)
+      sc_set_main_menu(menu_main);
+      #endif
+
+      sc_init();
       #endif
 
       keycard_generate_key_uid();
       keycard_init_nvm();
 
-      #ifdef LISTEN_BLE
-      if (os_seph_features() & SEPROXYHAL_TAG_SESSION_START_EVENT_FEATURE_BLE) {
-        BLE_power(0, NULL);
-        BLE_power(1, NULL);
-      }
+      #if defined(TARGET_NANOX)
+      G_io_app.plane_mode = os_setting_get(OS_SETTING_PLANEMODE, NULL, 0);
+      BLE_power(0, NULL);
+      BLE_power(1, "Nano X");
       #endif
 
       USB_power(0);

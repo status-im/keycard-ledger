@@ -25,15 +25,19 @@ include $(BOLOS_SDK)/Makefile.defines
 APPNAME = "Keycard"
 APPMAJOR = 2
 APPMINOR = 2
-APPPATCH = 0
+APPPATCH = 1
 APPVERSION = $(APPMAJOR).$(APPMINOR).$(APPPATCH)
 
-APP_LOAD_PARAMS = --appFlags 0x10 $(COMMON_LOAD_PARAMS)
+APP_LOAD_PARAMS = --appFlags 0x210 $(COMMON_LOAD_PARAMS)
 
 ifeq ($(TARGET_NAME),TARGET_BLUE)
 ICONNAME=blue_app_keycard.gif
 else
+ifeq ($(TARGET_NAME),TARGET_NANOX)
+ICONNAME=nanox_app_$(COIN).gif
+else
 ICONNAME=nanos_app_keycard.gif
+endif
 endif
 
 # Build configuration
@@ -41,17 +45,45 @@ endif
 APP_SOURCE_PATH += src
 SDK_SOURCE_PATH += lib_stusb lib_stusb_impl
 
+ifeq ($(TARGET_NAME),TARGET_NANOX)
+SDK_SOURCE_PATH  += lib_blewbxx lib_blewbxx_impl
+SDK_SOURCE_PATH  += lib_ux
+endif
+
 DEFINES += APPVERSION=\"$(APPVERSION)\" APPMAJOR=$(APPMAJOR) APPMINOR=$(APPMINOR)
 DEFINES += SECURE_CHANNEL
-#DEFINES += TEST_BUILD
-DEFINES += OS_IO_SEPROXYHAL IO_SEPROXYHAL_BUFFER_SIZE_B=128
+DEFINES += TEST_BUILD UNUSED\(x\)=\(void\)x
+DEFINES += OS_IO_SEPROXYHAL
 DEFINES += HAVE_BAGL HAVE_SPRINTF
-DEFINES += PRINTF\(...\)=
-#DEFINES += HAVE_PRINTF PRINTF=screen_printf
 
 DEFINES += HAVE_IO_USB HAVE_L4_USBLIB IO_USB_MAX_ENDPOINTS=7 IO_HID_EP_LENGTH=64 HAVE_USB_APDU
 
-DEFINES += CX_COMPLIANCE_141
+ifeq ($(TARGET_NAME),TARGET_NANOX)
+DEFINES += IO_SEPROXYHAL_BUFFER_SIZE_B=300
+DEFINES += HAVE_BLE BLE_COMMAND_TIMEOUT_MS=2000
+DEFINES += HAVE_BLE_APDU # basic ledger apdu transport over BLE
+DEFINES += HAVE_GLO096
+DEFINES += HAVE_BAGL BAGL_WIDTH=128 BAGL_HEIGHT=64
+DEFINES += HAVE_BAGL_ELLIPSIS # long label truncation feature
+DEFINES += HAVE_BAGL_FONT_OPEN_SANS_REGULAR_11PX
+DEFINES += HAVE_BAGL_FONT_OPEN_SANS_EXTRABOLD_11PX
+DEFINES += HAVE_BAGL_FONT_OPEN_SANS_LIGHT_16PX
+DEFINES	+= HAVE_UX_FLOW
+else
+DEFINES += IO_SEPROXYHAL_BUFFER_SIZE_B=128
+endif
+
+# Enabling debug PRINTF
+DEBUG = 0
+ifneq ($(DEBUG),0)
+ifeq ($(TARGET_NAME),TARGET_NANOX)
+DEFINES += HAVE_PRINTF PRINTF=mcu_usb_printf
+else
+DEFINES += HAVE_PRINTF PRINTF=screen_printf
+endif
+else
+DEFINES += PRINTF\(...\)=
+endif
 
 # Compiler, assembler, and linker
 
@@ -94,3 +126,9 @@ delete:
 # Import generic rules from the SDK
 include $(BOLOS_SDK)/Makefile.glyphs
 include $(BOLOS_SDK)/Makefile.rules
+
+#add dependency on custom makefile filename
+dep/%.d: %.c Makefile
+
+listvariants:
+	@echo VARIANTS COIN icon icon_testnet
