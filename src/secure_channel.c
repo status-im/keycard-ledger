@@ -31,7 +31,6 @@ secure_channel_keys_t G_sc_keys;
 #if defined(TARGET_BLUE)
 //TODO: BLUE GUI
 #elif defined(TARGET_NANOS)
-ux_menu_entry_t *G_main_menu;
 const bagl_element_t ui_pair_nanos[] = {
   // {{type, userid, x, y, width, height, stroke, radius, fill, fgcolor, bgcolor, font_id, icon_id}, text, touch_area_brim, overfgcolor, overbgcolor, tap, out, over }
   {{BAGL_RECTANGLE, 0x00, 0, 0, 128, 32, 0, 0, BAGL_FILL, 0x000000, 0xFFFFFF, 0, 0}, NULL, 0, 0, 0, NULL, NULL, NULL},
@@ -44,7 +43,7 @@ unsigned int ui_pair_nanos_button(unsigned int button_mask, unsigned int button_
   UNUSED(button_mask);
   UNUSED(button_mask_counter);
 
-  UX_MENU_DISPLAY(0, G_main_menu, NULL);
+  ui_idle();
   return 0;
 }
 
@@ -71,14 +70,12 @@ unsigned int ui_clear_pairings_nanos_button(unsigned int button_mask, unsigned i
     }
   }
 
-  UX_MENU_DISPLAY(0, G_main_menu, NULL);
+  ui_idle();
 
   return 0;
 }
+#elif defined(TARGET_NANOX)
 
-void sc_set_main_menu(ux_menu_entry_t *menu_main) {
-  G_main_menu = main_menu;
-}
 #endif
 
 void sc_nvm_init() {
@@ -183,6 +180,7 @@ void sc_generate_pairing_password(unsigned int ignored) {
   // TODO: implement Ledger Blue UI
   #elif defined(TARGET_NANOS)
   UX_DISPLAY(ui_pair_nanos, NULL);
+  #elif defined(TARGET_NANOX)
   #endif
 }
 
@@ -191,6 +189,7 @@ void sc_clear_pairings(unsigned int ignored) {
   // TODO: implement Ledger Blue UI
   #elif defined(TARGET_NANOS)
   UX_DISPLAY(ui_clear_pairings_nanos, NULL);
+  #elif defined(TARGET_NANOX)
   #endif
 }
 

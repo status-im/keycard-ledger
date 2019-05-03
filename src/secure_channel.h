@@ -24,10 +24,6 @@
 void sc_nvm_init();
 void sc_init();
 
-#if defined (TARGET_NANOS)
-void sc_set_main_menu(ux_menu_entry_t *menu_main);
-#endif
-
 void sc_preprocess_apdu(unsigned char* apdu);
 void sc_postprocess_apdu(unsigned char* apdu, volatile unsigned int *tx);
 

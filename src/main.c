@@ -117,8 +117,6 @@ uint8_t G_make_current;
 
 uint8_t G_tmp_hash[HASH_LEN];
 
-static void ui_idle(void);
-
 #ifdef TARGET_NANOX
 #include "ux.h"
 ux_state_t G_ux;
@@ -394,6 +392,108 @@ const bagl_element_t ui_export_key_nanos[] = {
 unsigned int ui_export_key_nanos_button(unsigned int button_mask, unsigned int button_mask_counter) {
   return ui_nanos_button_handler(button_mask, &ui_export_key_nanos[3]);
 }
+#elif defined(TARGET_NANOX)
+void display_settings();
+
+UX_STEP_NOCB(
+  ux_idle_flow_1_step,
+  pnn,
+  {
+    &C_icon_dashboard, //&C_icon,
+    "Keycard",
+    #if defined (TEST_BUILD)
+    "TEST BUILD"
+    #else
+    "by Status"
+    #endif
+  });
+
+UX_STEP_NOCB(
+  ux_idle_flow_2_step,
+  bn,
+  {
+    "Version",
+    APPVERSION,
+  });
+
+UX_STEP_VALID(
+  ux_idle_flow_3_step,
+  pb,
+  display_settings(),
+  {
+    &C_icon_dashboard, //&C_icon_eye,
+    "Settings",
+  });
+
+#if defined(SECURE_CHANNEL)
+UX_STEP_VALID(
+  ux_idle_flow_4_step,
+  pb,
+  sc_generate_pairing_password(0),
+  {
+    &C_icon_dashboard, // change
+    "Pairing password",
+  });
+
+UX_STEP_VALID(
+  ux_idle_flow_5_step,
+  pb,
+  sc_clear_pairings(0),
+  {
+    &C_icon_dashboard, //change
+    "Clear pairings",
+  });
+#endif
+
+UX_STEP_VALID(
+  ux_idle_flow_6_step,
+  pb,
+  os_sched_exit(-1),
+  {
+    &C_icon_dashboard,
+    "Quit",
+  });
+
+UX_FLOW(ux_idle_flow,
+  &ux_idle_flow_1_step,
+  &ux_idle_flow_2_step,
+  &ux_idle_flow_3_step,
+#if defined(SECURE_CHANNEL)
+  &ux_idle_flow_4_step,
+  &ux_idle_flow_5_step,
+#endif
+  &ux_idle_flow_6_step
+);
+
+UX_STEP_VALID(
+    ux_sign_flow_step,
+    nn,
+    display_settings(), // change!
+    {
+      "Sign",
+      "transaction?"
+    });
+
+UX_FLOW(ux_sign_flow,
+  &ux_sign_flow_step
+);
+
+UX_STEP_VALID(
+    ux_export_flow_step,
+    nn,
+    display_settings(), // change!
+    {
+      "Export",
+      "EIP-1581 key?"
+    });
+
+UX_FLOW(ux_export_flow,
+  &ux_export_flow_step
+);
+
+void display_settings() {
+
+}
 #endif
 
 unsigned short io_exchange_al(unsigned char channel, unsigned short tx_len) {
@@ -421,11 +521,17 @@ unsigned short io_exchange_al(unsigned char channel, unsigned short tx_len) {
   return 0;
 }
 
-static void ui_idle(void) {
+void ui_idle(void) {
   #if defined(TARGET_BLUE)
   UX_DISPLAY(ui_idle_blue, NULL);
   #elif defined(TARGET_NANOS)
   UX_MENU_DISPLAY(0, menu_main, NULL);
+  #elif defined(TARGET_NANOX)
+  if(G_ux.stack_count == 0) {
+      ux_stack_push();
+  }
+
+  ux_flow_init(0, ux_idle_flow, NULL);
   #endif
 }
 
@@ -627,6 +733,8 @@ void keycard_derive(uint8_t p1, uint8_t p2, uint8_t lc, unsigned char* apdu_data
      // TODO: implement Ledger Blue UI
      #elif defined(TARGET_NANOS)
      UX_DISPLAY(ui_sign_nanos, NULL);
+     #elif defined(TARGET_NANOX)
+     ux_flow_init(0, ux_sign_flow, NULL);
      #endif
 
      *flags |= IO_ASYNCH_REPLY;
@@ -693,6 +801,8 @@ void keycard_export(uint8_t p1, uint8_t p2, uint8_t lc, unsigned char* apdu_data
     // TODO: implement Ledger Blue UI
     #elif defined(TARGET_NANOS)
     UX_DISPLAY(ui_export_key_nanos, NULL);
+    #elif defined(TARGET_NANOX)
+    ux_flow_init(0, ux_export_flow, NULL);
     #endif
 
     *flags |= IO_ASYNCH_REPLY;
@@ -933,10 +1043,6 @@ __attribute__((section(".boot"))) int main(void) {
       io_seproxyhal_init();
 
       #if defined(SECURE_CHANNEL)
-      #if defined (TARGET_NANOS)
-      sc_set_main_menu(menu_main);
-      #endif
-
       sc_init();
       #endif
 
