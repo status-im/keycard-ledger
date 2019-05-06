@@ -201,7 +201,7 @@ unsigned short keycard_do_export(unsigned char* out, volatile unsigned int *tx) 
   return 0x9000;
 }
 
-static const bagl_element_t* io_seproxyhal_touch_ok(const bagl_element_t *e) {
+static void io_seproxyhal_touch_ok_real(int evt) {
   unsigned int tx = 0;
   unsigned short sw;
 
@@ -213,7 +213,7 @@ static const bagl_element_t* io_seproxyhal_touch_ok(const bagl_element_t *e) {
   }
   #endif
 
-  switch (e->component.userid) {
+  switch (evt) {
     case EVT_SIGN:
       sw = keycard_do_sign(&G_io_apdu_buffer[data_offset], &tx);
       break;
@@ -240,9 +240,14 @@ static const bagl_element_t* io_seproxyhal_touch_ok(const bagl_element_t *e) {
   io_exchange(CHANNEL_APDU | IO_RETURN_AFTER_TX, tx);
 
   ui_idle();
+}
 
+#if defined(TARGET_BLUE) || defined(TARGET_NANOS)
+static const bagl_element_t* io_seproxyhal_touch_ok(const bagl_element_t *e) {
+  io_seproxyhal_touch_ok_real(e->component.userid);
   return NULL;
 }
+#endif
 
 static const bagl_element_t* io_seproxyhal_touch_cancel(const bagl_element_t *e) {
   G_io_apdu_buffer[0] = 0x69;
@@ -395,6 +400,8 @@ unsigned int ui_export_key_nanos_button(unsigned int button_mask, unsigned int b
 #elif defined(TARGET_NANOX)
 void display_settings();
 
+// Main menu
+
 UX_STEP_NOCB(
   ux_idle_flow_1_step,
   pnn,
@@ -465,31 +472,73 @@ UX_FLOW(ux_idle_flow,
   &ux_idle_flow_6_step
 );
 
-UX_STEP_VALID(
-    ux_sign_flow_step,
+// Confirm sign
+
+UX_STEP_NOCB(
+    ux_sign_flow_1_step,
     nn,
-    display_settings(), // change!
     {
       "Sign",
       "transaction?"
     });
 
-UX_FLOW(ux_sign_flow,
-  &ux_sign_flow_step
-);
+UX_FLOW_DEF_VALID(
+  ux_sign_flow_2_step,
+  pb,
+  io_seproxyhal_touch_ok_real(EVT_SIGN),
+  {
+    &C_icon_dashboard, //change
+    "Approve",
+  });
 
-UX_STEP_VALID(
-    ux_export_flow_step,
-    nn,
-    display_settings(), // change!
-    {
-      "Export",
-      "EIP-1581 key?"
-    });
+UX_FLOW_DEF_VALID(
+  ux_sign_flow_3_step,
+  pb,
+  io_seproxyhal_touch_cancel(NULL),
+  {
+    &C_icon_dashboard, //change
+    "Reject",
+  });
+
+UX_FLOW(ux_sign_flow,
+  &ux_sign_flow_1_step,
+  &ux_sign_flow_2_step,
+  &ux_sign_flow_3_step
+  );
+
+// Confirm export
+
+UX_STEP_NOCB(
+  ux_export_flow_1_step,
+  nn,
+  {
+    "Export",
+    "EIP-1581 key?"
+  });
+
+UX_FLOW_DEF_VALID(
+  ux_export_flow_2_step,
+  pb,
+  io_seproxyhal_touch_ok_real(EVT_EXPORT),
+  {
+    &C_icon_dashboard, //change
+    "Approve",
+  });
+
+UX_FLOW_DEF_VALID(
+  ux_export_flow_3_step,
+  pb,
+  io_seproxyhal_touch_cancel(NULL),
+  {
+    &C_icon_dashboard, //change
+    "Reject",
+  });
 
 UX_FLOW(ux_export_flow,
-  &ux_export_flow_step
-);
+  &ux_export_flow_1_step,
+  &ux_export_flow_2_step,
+  &ux_export_flow_3_step
+  );
 
 void display_settings() {
 
