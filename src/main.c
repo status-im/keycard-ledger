@@ -24,6 +24,8 @@
 #include "secure_channel.h"
 #include "defines.h"
 
+#include <string.h>
+
 #define INS_SELECT 0xA4
 #define INS_GET_STATUS 0xF2
 #define INS_SET_NDEF 0xF3
@@ -399,6 +401,8 @@ unsigned int ui_export_key_nanos_button(unsigned int button_mask, unsigned int b
 }
 #elif defined(TARGET_NANOX)
 void display_settings();
+void switch_settings_confirm_export();
+void switch_settings_confirm_sign();
 
 // Main menu
 
@@ -540,8 +544,61 @@ UX_FLOW(ux_export_flow,
   &ux_export_flow_3_step
   );
 
-void display_settings() {
+// Settings
 
+UX_FLOW_DEF_VALID(
+  ux_settings_flow_1_step,
+  bnnn,
+  switch_settings_confirm_export(),
+  {
+    "Confirmation",
+    "Ask confirmation",
+    "on export?",
+    (char *) G_tmp_hash
+  });
+
+UX_FLOW_DEF_VALID(
+  ux_settings_flow_2_step,
+  bnnn,
+  switch_settings_confirm_sign(),
+  {
+    "Confirmation",
+    "Ask confirmation",
+    "on sign?",
+    (char *) &G_tmp_hash[4]
+  });
+
+UX_FLOW_DEF_VALID(
+  ux_settings_flow_3_step,
+  pb,
+  ui_idle(),
+  {
+    &C_icon_back,
+    "Back",
+  });
+
+UX_FLOW(ux_settings_flow,
+  &ux_settings_flow_1_step,
+  &ux_settings_flow_2_step,
+  &ux_settings_flow_3_step
+  );
+
+void display_settings() {
+  strcpy((char *)G_tmp_hash, (N_storage.confirm_export ? "Yes" : "No"));
+  strcpy((char *)&G_tmp_hash[4], (N_storage.confirm_sign ? "Yes" : "No"));
+  ux_flow_init(0, ux_settings_flow, NULL);
+}
+
+void switch_settings_confirm_export() {
+  uint8_t confirm_export = (N_storage.confirm_export ? 0 : 1);
+  nvm_write(&N_storage.confirm_export, (void*)&confirm_export, sizeof(uint8_t));
+  display_settings();
+}
+
+void switch_settings_confirm_sign() {
+  uint8_t confirm_sign = (N_storage.confirm_sign ? 0 : 1);
+  nvm_write(&N_storage.confirm_export, (void*)&confirm_sign, sizeof(uint8_t));
+  display_settings();
 }
 #endif
 
