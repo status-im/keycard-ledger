@@ -7,6 +7,10 @@
 #include "cx.h"
 #include "os_io_seproxyhal.h"
 
+#ifdef TARGET_NANOX
+#include "ux.h"
+#endif
+
 #define PAIR_P1_FIRST_STEP 0x00
 #define PAIR_P1_LAST_STEP 0x01
 
@@ -75,7 +79,59 @@ unsigned int ui_clear_pairings_nanos_button(unsigned int button_mask, unsigned i
   return 0;
 }
 #elif defined(TARGET_NANOX)
+void sc_do_clear_pairings();
 
+UX_FLOW_DEF_NOCB(
+  ux_pairing_password_flow_1_step,
+  bn,
+  {
+    "Pairing password",
+    G_sc_pairing_password
+  });
+
+UX_FLOW_DEF_VALID(
+  ux_pairing_password_flow_2_step,
+  pb,
+  ui_idle(),
+  {
+    &C_icon_back,
+    "Back",
+  });
+
+UX_FLOW(ux_pairing_password_flow,
+  &ux_pairing_password_flow_1_step,
+  &ux_pairing_password_flow_2_step
+  );
+
+// Clear pairing flow
+
+UX_FLOW_DEF_VALID(
+  ux_clear_pairings_flow_1_step,
+  pb,
+  sc_do_clear_pairings(),
+  {
+    &C_icon_dashboard, // change
+    "Clear all pairings",
+  });
+
+UX_FLOW_DEF_VALID(
+  ux_clear_pairings_flow_2_step,
+  pb,
+  ui_idle(),
+  {
+    &C_icon_back,
+    "Back",
+  });
+
+UX_FLOW(ux_clear_pairings_flow,
+  &ux_clear_pairings_flow_1_step,
+  &ux_clear_pairings_flow_2_step
+  );
+
+void sc_do_clear_pairings() {
+  sc_nvm_init();
+  ui_idle();
+}
 #endif
 
 void sc_nvm_init() {
@@ -181,6 +237,7 @@ void sc_generate_pairing_password(unsigned int ignored) {
   #elif defined(TARGET_NANOS)
   UX_DISPLAY(ui_pair_nanos, NULL);
   #elif defined(TARGET_NANOX)
+  ux_flow_init(0, ux_pairing_password_flow, NULL);
   #endif
 }
 
@@ -190,6 +247,7 @@ void sc_clear_pairings(unsigned int ignored) {
   #elif defined(TARGET_NANOS)
   UX_DISPLAY(ui_clear_pairings_nanos, NULL);
   #elif defined(TARGET_NANOX)
+  ux_flow_init(0, ux_clear_pairings_flow, NULL);
   #endif
 }
 

@@ -452,7 +452,7 @@ UX_STEP_VALID(
   sc_clear_pairings(0),
   {
     &C_icon_dashboard, //change
-    "Clear pairings",
+    "Pairings",
   });
 #endif
 
@@ -548,7 +548,7 @@ UX_FLOW(ux_export_flow,
 
 UX_FLOW_DEF_VALID(
   ux_settings_flow_1_step,
-  bnnn,
+  bnn,
   switch_settings_confirm_export(),
   {
     "Confirmation",
@@ -559,7 +559,7 @@ UX_FLOW_DEF_VALID(
 
 UX_FLOW_DEF_VALID(
   ux_settings_flow_2_step,
-  bnnn,
+  bnn,
   switch_settings_confirm_sign(),
   {
     "Confirmation",
