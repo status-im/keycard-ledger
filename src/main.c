@@ -100,8 +100,8 @@ typedef struct internalStorage_t {
   uint8_t initialized;
 } internalStorage_t;
 
-internalStorage_t N_storage_real;
-#define N_storage (*(internalStorage_t*) PIC(&N_storage_real))
+const internalStorage_t N_storage_real;
+#define N_storage (*(volatile internalStorage_t*) PIC(&N_storage_real))
 
 const uint8_t C_instance_aid[] = { 0xA0, 0x00, 0x00, 0x08, 0x04, 0x00, 0x01, 0x01, 0x01 };
 

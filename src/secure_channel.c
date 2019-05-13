@@ -14,8 +14,8 @@
 #define PAIR_P1_FIRST_STEP 0x00
 #define PAIR_P1_LAST_STEP 0x01
 
-uint8_t N_pairings_real[SC_PAIRING_ARRAY_LEN];
-#define N_pairings ((uint8_t*) PIC(&N_pairings_real))
+const uint8_t N_pairings_real[SC_PAIRING_ARRAY_LEN];
+#define N_pairings ((volatile uint8_t*) PIC(&N_pairings_real))
 
 cx_ecfp_private_key_t G_sc_private_key;
 cx_ecfp_public_key_t G_sc_public_key;
