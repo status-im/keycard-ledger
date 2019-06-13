@@ -548,7 +548,7 @@ UX_FLOW(ux_export_flow,
 
 UX_FLOW_DEF_VALID(
   ux_settings_flow_1_step,
-  bnn,
+  bnnn,
   switch_settings_confirm_export(),
   {
     "Confirmation",
@@ -559,7 +559,7 @@ UX_FLOW_DEF_VALID(
 
 UX_FLOW_DEF_VALID(
   ux_settings_flow_2_step,
-  bnn,
+  bnnn,
   switch_settings_confirm_sign(),
   {
     "Confirmation",
@@ -597,7 +597,7 @@ void switch_settings_confirm_export() {
 
 void switch_settings_confirm_sign() {
   uint8_t confirm_sign = (N_storage.confirm_sign ? 0 : 1);
-  nvm_write(&N_storage.confirm_export, (void*)&confirm_sign, sizeof(uint8_t));
+  nvm_write(&N_storage.confirm_sign, (void*)&confirm_sign, sizeof(uint8_t));
   display_settings();
 }
 #endif
