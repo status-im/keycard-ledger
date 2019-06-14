@@ -252,10 +252,21 @@ static const bagl_element_t* io_seproxyhal_touch_ok(const bagl_element_t *e) {
 #endif
 
 static const bagl_element_t* io_seproxyhal_touch_cancel(const bagl_element_t *e) {
-  G_io_apdu_buffer[0] = 0x69;
-  G_io_apdu_buffer[1] = 0x85;
+  unsigned int tx = 2;
 
-  io_exchange(CHANNEL_APDU | IO_RETURN_AFTER_TX, 2);
+  #if defined(SECURE_CHANNEL)
+  if (sc_get_status() == SC_STATE_OPEN) {
+    G_io_apdu_buffer[SC_IV_LEN] = 0x69;
+    G_io_apdu_buffer[SC_IV_LEN + 1] = 0x85;
+    sc_postprocess_apdu(G_io_apdu_buffer, &tx);
+  } else
+  #endif
+  {
+    G_io_apdu_buffer[0] = 0x69;
+    G_io_apdu_buffer[1] = 0x85;
+  }
+
+  io_exchange(CHANNEL_APDU | IO_RETURN_AFTER_TX, tx);
 
   ui_idle();
 
